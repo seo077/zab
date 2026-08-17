@@ -104,8 +104,10 @@ model's context. Payload keys: `session_id`, `transcript_path`, `cwd`, `hook_eve
 
 Consequences:
 
-- **`CLAUDE_PLUGIN_DATA` does exist on 2.1.233** (a 2.1.77 trace said otherwise). Still prefer
-  it only as one rung of the ladder: `IL_HOME` → `CLAUDE_PLUGIN_DATA` → `~/.interlocking/`.
+- **`CLAUDE_PLUGIN_DATA` does exist on 2.1.233** (a 2.1.77 trace said otherwise) — but it is
+  deliberately **not** used to locate the store. It is present for hook processes and absent
+  for the `!` blocks commands run from, which split the store in two. See the dogfooding
+  section below.
 - **`CLAUDE_SESSION_ID` is null in hooks.** Use `session_id` from stdin, never the env var.
 - `CLAUDE_PLUGIN_ROOT` carries a **trailing slash**; join paths defensively.
 
