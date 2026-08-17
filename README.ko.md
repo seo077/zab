@@ -13,6 +13,13 @@
 /plugin install il@interlocking
 ```
 
+
+<p align="center">
+  <img src="docs/demo.svg" alt="터미널 재생: 게이트가 쓰기를 거부하고, 위조 시도 두 개가 실패하고, 사람이 승인하고, 독립 검증자가 프로젝트 자신의 메모를 신뢰하지 않는 장면" width="880">
+</p>
+
+<sub>실제 실행 기록입니다 — <a href="docs/design/WALKTHROUGH.ko.md">WALKTHROUGH.ko.md</a>. 재생성: <code>node tools/make-demo.mjs &gt; docs/demo.svg</code></sub>
+
 ---
 
 ## 왜 또 만드나

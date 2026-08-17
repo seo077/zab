@@ -14,6 +14,13 @@ itself, however it is asked.
 /plugin install il@interlocking
 ```
 
+
+<p align="center">
+  <img src="docs/demo.svg" alt="A terminal replay: the gate refusing a write, two forgery attempts failing, a human approving, and an independent verifier refusing to trust the project&apos;s own notes" width="880">
+</p>
+
+<sub>Real output from the run written up in <a href="docs/design/WALKTHROUGH.ko.md">WALKTHROUGH.ko.md</a> (Korean). Regenerate with <code>node tools/make-demo.mjs &gt; docs/demo.svg</code>.</sub>
+
 ---
 
 ## Why another one of these?
