@@ -277,3 +277,315 @@ export function classify(rawPath, ctx) {
     return 'free';
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § bash — what does this shell command write?
+//
+// While G0 is closed, the gate is only as strong as this function. It is
+// specified entirely by test/fixtures/bash-writes.txt; read that file first.
+//
+// Two honest limits, both recorded in the corpus and the README:
+//   - a target built at runtime cannot be resolved, so those forms are denied
+//     outright rather than guessed at
+//   - obfuscation (base64 into a pipe, awk's internal redirect) is not caught.
+//     This is a guardrail against accidental drift, not a sandbox.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SEPARATORS = new Set([';', '|', '||', '&&', '&']);
+
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
+
+const LAUNCHERS = new Set(['npx', 'pnpx', 'bunx', 'dlx']);
+
+const SCAFFOLD_SUBCOMMANDS = {
+  npm: ['init'],
+  yarn: ['create', 'init'],
+  pnpm: ['create', 'init'],
+  bun: ['create', 'init'],
+  cargo: ['new', 'init'],
+  rails: ['new'],
+  dotnet: ['new'],
+  'django-admin': ['startproject', 'startapp'],
+};
+
+/**
+ * Quote-aware shell tokenizer, returning `{value, raw, op, quoted}`.
+ * Getting the quoting right is the whole point: `echo "2 > 1"` must not look
+ * like a redirect, and `echo "use python -c"` must not look like an interpreter.
+ */
+export function tokenizeShell(cmd) {
+  const src = typeof cmd === 'string' ? cmd : '';
+  const out = [];
+  let cur = '';
+  let raw = '';
+  let started = false; // distinguishes an empty quoted arg '' from "no arg at all"
+  let quoted = false;
+
+  const flush = () => {
+    if (started) out.push({ value: cur, raw, op: false, quoted });
+    cur = '';
+    raw = '';
+    started = false;
+    quoted = false;
+  };
+  const pushOp = (value) => {
+    flush();
+    out.push({ value, raw: value, op: true, quoted: false });
+  };
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+
+    if (ch === '\\') {
+      const next = src[i + 1];
+      if (next !== undefined) {
+        cur += next;
+        raw += ch + next;
+        i++;
+      }
+      started = true;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      const close = src.indexOf(ch, i + 1);
+      cur += close === -1 ? src.slice(i + 1) : src.slice(i + 1, close);
+      raw += close === -1 ? src.slice(i) : src.slice(i, close + 1);
+      started = true;
+      quoted = true;
+      i = close === -1 ? src.length : close;
+      continue;
+    }
+
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      flush();
+      continue;
+    }
+
+    if (ch === '>' || ch === '<') {
+      // A leading file-descriptor number belongs to the operator, not the word.
+      let fd = '';
+      if (!quoted && /^[0-9]+$/.test(cur)) {
+        fd = cur;
+        cur = '';
+        raw = '';
+        started = false;
+      }
+      let op = ch;
+      if (src[i + 1] === ch) {
+        op += ch;
+        i++;
+        if (ch === '<' && src[i + 1] === '<') {
+          op += ch; // herestring <<<
+          i++;
+        }
+      }
+      // `2>&1` duplicates a descriptor; no filename follows it.
+      if (src[i + 1] === '&') {
+        let j = i + 2;
+        let dup = '';
+        while (j < src.length && /[0-9-]/.test(src[j])) dup += src[j++];
+        if (dup) {
+          pushOp(fd + op + '&' + dup);
+          i = j - 1;
+          continue;
+        }
+      }
+      pushOp(fd + op);
+      continue;
+    }
+
+    if (ch === '&') {
+      if (src[i + 1] === '&') {
+        pushOp('&&');
+        i++;
+      } else if (src[i + 1] === '>') {
+        let op = '&>';
+        i++;
+        if (src[i + 1] === '>') {
+          op += '>';
+          i++;
+        }
+        pushOp(op);
+      } else {
+        pushOp('&');
+      }
+      continue;
+    }
+
+    if (ch === '|') {
+      if (src[i + 1] === '|') {
+        pushOp('||');
+        i++;
+      } else {
+        pushOp('|');
+      }
+      continue;
+    }
+
+    if (ch === ';') {
+      pushOp(';');
+      continue;
+    }
+
+    cur += ch;
+    raw += ch;
+    started = true;
+  }
+  flush();
+  return out;
+}
+
+/** An operator that names a file to write. Descriptor duplication does not. */
+function isOutputRedirect(op) {
+  return /^[0-9]*&?>>?$/.test(op);
+}
+
+function isInputRedirect(op) {
+  return /^[0-9]*<<?<?$/.test(op);
+}
+
+/** A target we cannot resolve statically is not a target we can wave through. */
+function isUnresolvable(value) {
+  return value.includes('$') || value.includes('`');
+}
+
+function isFlag(tok) {
+  return tok.startsWith('-') && tok !== '-' && tok !== '--';
+}
+
+function baseName(cmd) {
+  const s = String(cmd).replace(/\\/g, '/');
+  return s.slice(s.lastIndexOf('/') + 1).toLowerCase();
+}
+
+/** Strip `npx`/`bunx` so the tool is judged rather than its launcher. */
+function effectiveArgv(argv) {
+  if (argv.length > 1 && LAUNCHERS.has(baseName(argv[0]))) return argv.slice(1);
+  return argv;
+}
+
+/** Blanket-deny rules, evaluated per simple command. Returns a tag, or null. */
+function denyReason(argv) {
+  if (argv.length === 0) return null;
+  const cmd = baseName(argv[0]);
+  const rest = argv.slice(1);
+  const has = (...flags) => rest.some((r) => flags.includes(r));
+
+  // A nested session could submit its own user prompts — the one thing the
+  // approval path assumes cannot happen.
+  if (cmd === 'claude') return 'nested-agent';
+
+  // Code passed as a string literal cannot be inspected.
+  if (['python', 'python3', 'py'].includes(cmd) && has('-c')) return 'interpreter';
+  if (['node', 'nodejs'].includes(cmd) && has('-e', '--eval', '-p', '--print')) return 'interpreter';
+  if (cmd === 'ruby' && has('-e')) return 'interpreter';
+  if (cmd === 'php' && has('-r')) return 'interpreter';
+  if (cmd === 'deno' && rest[0] === 'eval') return 'interpreter';
+  // `perl -i` is in-place editing (targets are extractable); `perl -e` is not.
+  const perlInPlace = rest.some((r) => /^-[a-zA-Z.]*i/.test(r));
+  if (cmd === 'perl' && !perlInPlace && rest.some((r) => /^-[a-zA-Z]*e/.test(r))) return 'interpreter';
+
+  // The command we would analyze is not the command that runs.
+  if (['eval', 'source', '.', 'xargs'].includes(cmd)) return 'shell-eval';
+  if (SHELLS.has(cmd) && rest.length > 0) return 'shell-eval';
+
+  // Patch application and history rewrites move bytes we never see.
+  if (cmd === 'patch') return 'patch';
+  if (cmd === 'git') {
+    const sub = rest.find((r) => !isFlag(r));
+    if (sub === 'apply' || sub === 'restore') return 'patch';
+    if (sub === 'checkout' && rest.includes('--')) return 'patch';
+    if (sub === 'stash' && (rest.includes('pop') || rest.includes('apply'))) return 'patch';
+    if (sub === 'reset' && rest.includes('--hard')) return 'patch';
+    if (sub === 'clean') return 'patch';
+  }
+
+  // Scaffolders write whole trees, and the paths appear nowhere in the command.
+  if (cmd.startsWith('create-')) return 'scaffold';
+  if (cmd === 'go' && rest[0] === 'mod' && rest[1] === 'init') return 'scaffold';
+  const subs = SCAFFOLD_SUBCOMMANDS[cmd];
+  if (subs) {
+    const sub = rest.find((r) => !isFlag(r));
+    if (sub && (subs.includes(sub) || sub.startsWith('create-'))) return 'scaffold';
+  }
+
+  return null;
+}
+
+/** Write targets named by a single simple command (no separators inside). */
+function targetsOf(tokens) {
+  const targets = [];
+  const argv = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (!t.op) {
+      argv.push(t.value);
+      continue;
+    }
+    const next = tokens[i + 1];
+    if (isOutputRedirect(t.value)) {
+      if (next && !next.op) {
+        targets.push(next.value);
+        i++;
+      }
+    } else if (isInputRedirect(t.value)) {
+      // Consume the heredoc delimiter / input file so it is never read as a target.
+      if (next && !next.op) i++;
+    }
+  }
+
+  if (argv.length === 0) return { targets, argv };
+
+  const a = effectiveArgv(argv);
+  const cmd = baseName(a[0]);
+  const rest = a.slice(1);
+  const nonFlags = rest.filter((r) => !isFlag(r) && r !== '');
+
+  if (cmd === 'tee') {
+    targets.push(...nonFlags);
+  } else if (cmd === 'sed' && rest.some((r) => /^-[a-zA-Z]*i/.test(r))) {
+    targets.push(...nonFlags.slice(1)); // first non-flag is the sed script
+  } else if (cmd === 'perl' && rest.some((r) => /^-[a-zA-Z.]*i/.test(r))) {
+    const skip = rest.some((r) => /^-[a-zA-Z]*e/.test(r)) ? 1 : 0;
+    targets.push(...nonFlags.slice(skip));
+  } else if (['cp', 'mv', 'install', 'ln', 'rsync'].includes(cmd) && nonFlags.length >= 2) {
+    targets.push(nonFlags[nonFlags.length - 1]);
+  }
+
+  return { targets, argv: a };
+}
+
+/**
+ * @param {string} cmd
+ * @returns {{writes: string[], denyTag: string|null}}
+ *   `denyTag` means deny outright. `writes` are paths for classify() to judge —
+ *   `> README.md` is extracted but will be allowed, because README.md is free.
+ */
+export function analyzeBash(cmd) {
+  try {
+    if (typeof cmd !== 'string' || cmd === '') return { writes: [], denyTag: null };
+
+    const segments = [[]];
+    for (const t of tokenizeShell(cmd)) {
+      if (t.op && SEPARATORS.has(t.value)) segments.push([]);
+      else segments[segments.length - 1].push(t);
+    }
+
+    const writes = [];
+    for (const seg of segments) {
+      const { targets, argv } = targetsOf(seg);
+      const tag = denyReason(argv);
+      if (tag) return { writes: [], denyTag: tag };
+      for (const t of targets) {
+        if (isUnresolvable(t)) return { writes: [], denyTag: 'unresolvable-target' };
+        if (!writes.includes(t)) writes.push(t);
+      }
+    }
+    return { writes, denyTag: null };
+  } catch {
+    // A parser bug must never block the user's work.
+    return { writes: [], denyTag: null };
+  }
+}
