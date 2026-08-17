@@ -1647,6 +1647,78 @@ function onCheck(_input, ctx) {
 }
 
 /**
+ * Hook behaviour differs between Claude Code versions — measured, not assumed
+ * (docs/design/platform-facts.md records two builds disagreeing about which env
+ * vars exist). Rather than claim a guarantee it cannot deliver, the harness
+ * measures its own environment and says what it can and cannot enforce.
+ */
+function onDoctor(_input, ctx) {
+  const out = [];
+  const ok = (b) => (b ? '✓' : '✗');
+
+  const version = (cmd, args) => {
+    try {
+      return execFileSync(cmd, args, { timeout: 4000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+        .trim()
+        .split('\n')[0];
+    } catch {
+      return null;
+    }
+  };
+
+  const node = process.version;
+  const git = version('git', ['--version']);
+  out.push(`node      ${node}`);
+  out.push(`git       ${git ?? '✗ not found — resume cannot detect uncommitted work'}`);
+  out.push(`platform  ${process.platform}${process.env.MSYSTEM ? ` (${process.env.MSYSTEM})` : ''}`);
+
+  out.push('');
+  out.push('plugin environment');
+  out.push(`  ${ok(!!process.env.CLAUDE_PLUGIN_ROOT)} CLAUDE_PLUGIN_ROOT   ${process.env.CLAUDE_PLUGIN_ROOT ?? '(absent — expected when run outside a plugin hook)'}`);
+  out.push(`  ${ok(!!process.env.CLAUDE_PLUGIN_DATA)} CLAUDE_PLUGIN_DATA   ${process.env.CLAUDE_PLUGIN_DATA ?? '(absent on older builds — il falls back to ~/.interlocking)'}`);
+  out.push(`  ${ok(!!process.env.CLAUDE_PROJECT_DIR)} CLAUDE_PROJECT_DIR   ${process.env.CLAUDE_PROJECT_DIR ?? '(absent — falling back to cwd)'}`);
+
+  const key = loadKey(ctx.home);
+  out.push('');
+  out.push('approval store');
+  out.push(`  ${ok(!!key)} writable            ${ctx.home}`);
+
+  const pid = projectId(ctx.projectDir);
+  const everApproved = existsSync(join(storeDir(ctx.home, pid), 'approvals'));
+  const auditLog = readTextSafe(join(storeDir(ctx.home, pid), 'audit.log'), 4 * 1024 * 1024);
+  const approvedBefore = auditLog !== null && auditLog.includes('"event":"approve"');
+  out.push(
+    `  ${ok(approvedBefore)} prompt path proven  ${
+      approvedBefore
+        ? 'an approval has been recorded from a real keystroke'
+        : 'never exercised here — run /il:approve once to confirm it works on this build'
+    }`
+  );
+
+  const policy = loadPolicy(ctx.projectDir);
+  const enforcing = !!key && policy?.gate?.enforce !== false;
+  out.push('');
+  out.push(`mode      ${enforcing ? 'ENFORCING — code edits are blocked until G0 is approved' : 'ADVISORY — the gate warns but does not block'}`);
+  if (!key) out.push('          (the store is unwritable, so enforcement is off)');
+  if (policy?.gate?.enforce === false) out.push('          (turned off in .interlocking/policy.json)');
+
+  const crash = readTextSafe(join(ctx.home, 'crash.log'), 1024 * 1024);
+  if (crash) {
+    const lines = crash.trim().split('\n');
+    out.push('');
+    out.push(`⚠ ${lines.length} crash(es) logged in ${join(ctx.home, 'crash.log')}`);
+    out.push(`  most recent: ${lines[lines.length - 1].slice(0, 160)}`);
+  }
+
+  out.push('');
+  out.push('not measurable from here: whether UserPromptSubmit delivers raw slash text and');
+  out.push('whether PreToolUse deny is honoured. Both are exercised the first time you run');
+  out.push('/il:approve and then try to edit a source file.');
+
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+/**
  * `status` is a CLI mode, not a hook event: `/il:status` injects its output with
  * a `!` block. Keeping the reporting here means the command file cannot drift
  * from what the hook actually enforces.
@@ -1975,10 +2047,11 @@ const DISPATCH = {
   'pre-mcp': onPreMcp,
   status: onStatus,
   check: onCheck,
+  doctor: onDoctor,
 };
 
 /** Modes invoked from a command file rather than by a hook event. */
-const CLI_MODES = new Set(['status', 'check']);
+const CLI_MODES = new Set(['status', 'check', 'doctor']);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // § main
@@ -2042,7 +2115,9 @@ export async function main(argv = process.argv, env = process.env) {
 
     // The one check that must be fast: in a repo that does not use the harness,
     // this is a single stat and then we are gone.
-    if (!existsSync(join(projectDir, HARNESS_DIR))) {
+    // doctor answers "what can il enforce here?", which is exactly the question
+    // you ask before the harness is set up.
+    if (!existsSync(join(projectDir, HARNESS_DIR)) && mode !== 'doctor') {
       if (CLI_MODES.has(mode)) {
         process.stdout.write(
           `interlocking: not initialised in ${projectDir}\nRun /il:new <goal> to start, or /il:onboard for an existing repo.\n`
