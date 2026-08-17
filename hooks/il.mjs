@@ -15,7 +15,10 @@
  *     That is also what makes it testable.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, statSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // § paths — path classification
@@ -130,6 +133,21 @@ function toPosix(p) {
 }
 
 /**
+ * Git Bash / Cygwin spell `C:/x` as `/c/x` or `/cygdrive/c/x`, and hooks run under
+ * Git Bash on Windows (docs/design/platform-facts.md). A Bash command naming a file
+ * that way would otherwise look like it sits outside the project and skip the gate.
+ * Only applied on win32 — `/c` is an ordinary directory everywhere else.
+ */
+function fromMsysPath(p, platform) {
+  if (platform !== 'win32') return p;
+  const cyg = /^\/cygdrive\/([a-zA-Z])(\/|$)/.exec(p);
+  if (cyg) return `${cyg[1]}:/${p.slice(cyg[0].length)}`;
+  const msys = /^\/([a-zA-Z])(\/|$)/.exec(p);
+  if (msys) return `${msys[1]}:/${p.slice(msys[0].length)}`;
+  return p;
+}
+
+/**
  * Split into segments with `.` and `..` resolved.
  * Segment-wise comparison (rather than string prefixing) is what stops
  * `/home/u/projX` from being read as inside `/home/u/proj`.
@@ -215,9 +233,10 @@ function extensionOf(relPath) {
  */
 export function relativeToProject(rawPath, projectDir, platform) {
   const ci = platform === 'win32';
-  const projSegs = segments(toPosix(String(projectDir ?? '')));
-  let target = toPosix(String(rawPath));
-  if (!isAbsolute(target)) target = toPosix(String(projectDir ?? '')) + '/' + target;
+  const projRoot = fromMsysPath(toPosix(String(projectDir ?? '')), platform);
+  const projSegs = segments(projRoot);
+  let target = fromMsysPath(toPosix(String(rawPath)), platform);
+  if (!isAbsolute(target)) target = projRoot + '/' + target;
   const targetSegs = segments(target);
 
   if (targetSegs.length < projSegs.length) return null;
@@ -753,4 +772,446 @@ export function parseFrontmatter(text) {
   } catch {
     return fallback;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § env — where things live
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The approval store lives OUTSIDE the repo on purpose. Gate state kept inside
+ * the project would be a file the model can write, which would make the gate
+ * decorative. `STATE.md`'s `gates_passed` is a human-readable mirror only; the
+ * hook never consults it.
+ *
+ * Ladder, most specific first. CLAUDE_PLUGIN_DATA exists on 2.1.233 but not on
+ * older builds (see docs/design/platform-facts.md), so it is never assumed.
+ */
+export function ilHome(env = process.env) {
+  return env.IL_HOME || env.CLAUDE_PLUGIN_DATA || join(homedir(), '.interlocking');
+}
+
+/** Stable per-project key. realpath so that symlinked checkouts agree. */
+export function projectId(projectDir, platform = process.platform) {
+  let p = String(projectDir ?? '');
+  try {
+    p = realpathSync(p);
+  } catch {
+    /* not yet on disk — the raw path is still stable enough to key by */
+  }
+  p = p.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (platform === 'win32') p = p.toLowerCase();
+  return sha256hex(p).slice(0, 16);
+}
+
+/** Feature directory names are used to build paths, so they are whitelisted. */
+const FEATURE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function currentFeature(projectDir) {
+  const raw = readTextSafe(join(projectDir, HARNESS_DIR, 'current'), 4096);
+  if (raw === null) return null;
+  const name = raw.trim().split(/\r?\n/)[0]?.trim() ?? '';
+  return FEATURE_RE.test(name) ? name : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § fsx — I/O that cannot throw
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MAX_READ = 16 * 1024 * 1024;
+
+export function readTextSafe(path, maxBytes = MAX_READ) {
+  try {
+    const st = statSync(path);
+    if (!st.isFile() || st.size > maxBytes) return null;
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+function readJsonSafe(path) {
+  const text = readTextSafe(path, 1024 * 1024);
+  if (text === null) return null;
+  try {
+    const v = JSON.parse(text);
+    return v && typeof v === 'object' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** @returns {boolean} success — callers degrade rather than fail when false. */
+function ensureDir(path) {
+  try {
+    mkdirSync(path, { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § store — signed approval records
+//
+// The HMAC is NOT a cryptographic boundary against an adversarial model: the key
+// sits on the same disk and Bash can read it. Its job is to turn forgery from
+// "edit one plausible-looking line" into "a deliberate, named, multi-step act".
+// Those are wildly different probabilities, and only the second one is visible
+// in the audit log.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function storeDir(home, pid) {
+  return join(home, 'projects', pid);
+}
+
+/** @returns {Buffer|null} null means the store is unusable -> degraded mode. */
+function loadKey(home) {
+  const keyPath = join(home, 'key');
+  try {
+    if (existsSync(keyPath)) {
+      const buf = readFileSync(keyPath);
+      if (buf.length >= 32) return buf;
+    }
+  } catch {
+    return null;
+  }
+  if (!ensureDir(home)) return null;
+  try {
+    const key = randomBytes(32);
+    writeFileSync(keyPath, key, { mode: 0o600 });
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+/** Stable serialization so the signature does not depend on key order. */
+function canonical(obj) {
+  const { sig, ...rest } = obj;
+  return JSON.stringify(rest, Object.keys(rest).sort());
+}
+
+export function signToken(key, token) {
+  return 'hmac-sha256:' + createHmac('sha256', key).update(canonical(token)).digest('hex');
+}
+
+export function verifyToken(key, token) {
+  try {
+    if (!token || typeof token.sig !== 'string') return false;
+    const expected = Buffer.from(signToken(key, token));
+    const actual = Buffer.from(token.sig);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
+}
+
+function readApproval(home, pid, feature, gate) {
+  return readJsonSafe(join(storeDir(home, pid), 'approvals', `${feature}.${gate}.json`));
+}
+
+function readLease(home, pid, feature) {
+  return readJsonSafe(join(storeDir(home, pid), 'leases', `${feature}.json`));
+}
+
+function audit(home, pid, entry) {
+  try {
+    const dir = storeDir(home, pid);
+    if (!ensureDir(dir)) return;
+    appendFileSync(join(dir, 'audit.log'), JSON.stringify(entry) + '\n', 'utf8');
+  } catch {
+    /* auditing is best-effort; it must never affect a decision */
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § gate — is the G0 lock open?
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @returns {{open: boolean, why: string, feature: string|null, degraded?: boolean, lease?: object}}
+ */
+export function gateState(ctx) {
+  const { projectDir, home } = ctx;
+
+  const feature = currentFeature(projectDir);
+  // Nothing has been specced yet, so there is nothing to approve against.
+  // `/il:new` creates the feature and closes the gate.
+  if (!feature) return { open: true, why: 'no active feature', feature: null };
+
+  const key = loadKey(home);
+  if (!key) {
+    // Cannot read or create the store. Advisory, never blocking: a harness that
+    // bricks a session because its own storage broke gets uninstalled that day.
+    return { open: true, why: 'approval store unavailable', feature, degraded: true };
+  }
+
+  const pid = projectId(projectDir);
+  const token = readApproval(home, pid, feature, 'G0');
+
+  if (!token) {
+    const lease = readLease(home, pid, feature);
+    if (lease && verifyToken(key, lease) && leaseIsLive(lease)) {
+      return { open: true, why: 'override lease', feature, lease };
+    }
+    return { open: false, why: `G0 not approved for ${feature}`, feature };
+  }
+
+  if (!verifyToken(key, token)) {
+    // Not a bug — a bad signature is tampering. This is the one case that fails closed.
+    return { open: false, why: `approval record for ${feature} failed signature check`, feature };
+  }
+
+  const specPath = join(projectDir, HARNESS_DIR, 'work', feature, 'SPEC.md');
+  const spec = readTextSafe(specPath);
+  if (spec === null) {
+    return { open: false, why: `SPEC.md for ${feature} is missing or unreadable`, feature };
+  }
+  if (token.spec_hash !== specHash(spec)) {
+    return { open: false, why: `SPEC.md changed since G0 was approved for ${feature}`, feature };
+  }
+
+  return { open: true, why: 'G0 approved', feature };
+}
+
+function leaseIsLive(lease) {
+  try {
+    if (Number(lease.edits_used ?? 0) >= Number(lease.max_edits ?? 0)) return false;
+    return Date.parse(lease.expires_at) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § out — the stdout contract
+//
+// Silence means allow, and lets the normal permission system do its job.
+// `permissionDecision: "allow"` is NEVER emitted: it short-circuits permissions
+// and would silently auto-approve edits the human wanted to see.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function emit(obj) {
+  process.stdout.write(JSON.stringify(obj));
+}
+
+function denyTool(reason) {
+  emit({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  });
+}
+
+function noteTool(context) {
+  emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } });
+}
+
+function denyMessage(gate, target, specRelPath) {
+  return [
+    `[il] ${gate.why} — cannot write ${target}`,
+    `     SPEC: ${specRelPath}`,
+    `     Ask the human to review it and type:  /il:approve`,
+    `     Urgent? the human can type:           /il:override <reason>`,
+    `     Markdown, docs and ${HARNESS_DIR}/** are never blocked — keep planning.`,
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VERIFIER_AGENT = 'il-verifier';
+
+function loadPolicy(projectDir) {
+  const p = readJsonSafe(join(projectDir, HARNESS_DIR, 'policy.json'));
+  return p ?? DEFAULT_POLICY;
+}
+
+/** Paths a Write/Edit-family call would touch. */
+function writeTargetsOf(input) {
+  const ti = input?.tool_input ?? {};
+  const out = [];
+  for (const v of [ti.file_path, ti.notebook_path, ti.path]) {
+    if (typeof v === 'string' && v) out.push(v);
+  }
+  if (Array.isArray(ti.edits)) {
+    for (const e of ti.edits) if (typeof e?.file_path === 'string') out.push(e.file_path);
+  }
+  return out;
+}
+
+function onPreWrite(input, ctx) {
+  const targets = writeTargetsOf(input);
+  decideWrites(targets, [], input, ctx);
+}
+
+function onPreBash(input, ctx) {
+  const command = typeof input?.tool_input?.command === 'string' ? input.tool_input.command : '';
+  const { writes, denyTag } = analyzeBash(command);
+  decideWrites(writes, denyTag ? [denyTag] : [], input, ctx);
+}
+
+function onPreMcp(input, ctx) {
+  // Best-effort only, and documented as such: MCP servers name their tools freely.
+  const name = String(input?.tool_name ?? '');
+  if (!/write|edit|create|patch|apply|move|delete|remove|mkdir|fs/i.test(name)) return;
+  const gate = gateState(ctx);
+  if (gate.open) return;
+  denyTool(
+    `[il] ${gate.why} — MCP tool "${name}" looks like it writes files.\n` +
+      `     The human can approve with /il:approve, or bypass with /il:override <reason>.`
+  );
+}
+
+/**
+ * Shared decision path for Write-family and Bash.
+ * Order matters: cheap pure checks first, and the store is only consulted once
+ * something actually looks gated.
+ */
+function decideWrites(targets, denyTags, input, ctx) {
+  const agentType = String(input?.agent_type ?? '');
+  const policy = loadPolicy(ctx.projectDir);
+  const classifyCtx = { projectDir: ctx.projectDir, policy };
+
+  // The verifier's third, config-independent write block. `tools:` and
+  // `disallowedTools:` live in a file the agent definition controls; this does not.
+  if (agentType === VERIFIER_AGENT) {
+    const allowed = ctx.feature
+      ? `${HARNESS_DIR}/work/${ctx.feature}/VERIFY.md`
+      : `${HARNESS_DIR}/work/<feature>/VERIFY.md`;
+    const offending = targets.filter((t) => !isVerifyDoc(t, ctx));
+    if (offending.length || denyTags.length) {
+      denyTool(
+        `[il] the ${VERIFIER_AGENT} subagent cannot write source. It reads and runs; it does not implement.\n` +
+          `     Only ${allowed} is writable from this agent.\n` +
+          `     Record findings there, then return at most 3 lines.`
+      );
+    }
+    return;
+  }
+
+  const gated = targets.filter((t) => classify(t, classifyCtx) === 'code');
+  if (!gated.length && !denyTags.length) return;
+
+  const gate = gateState(ctx);
+  if (gate.open) {
+    if (gate.lease) {
+      noteTool(
+        `[il] override lease in force (reason: ${String(gate.lease.reason ?? '').slice(0, 80)}). ` +
+          `Record this write in ${HARNESS_DIR}/work/${gate.feature}/STATE.md history.`
+      );
+    } else if (gate.degraded) {
+      noteTool(`[il] running in advisory mode — ${gate.why}. The G0 block is NOT active.`);
+    }
+    return;
+  }
+
+  const specRel = gate.feature
+    ? `${HARNESS_DIR}/work/${gate.feature}/SPEC.md`
+    : `${HARNESS_DIR}/`;
+  const what = denyTags.length
+    ? `a command that cannot be checked statically (${denyTags.join(', ')})`
+    : gated[0];
+
+  audit(ctx.home, projectId(ctx.projectDir), {
+    at: new Date().toISOString(),
+    event: 'deny',
+    feature: gate.feature,
+    why: gate.why,
+    targets: gated.slice(0, 8),
+    tags: denyTags,
+    session: input?.session_id ?? null,
+    agent_type: agentType || null,
+  });
+
+  denyTool(denyMessage(gate, what, specRel));
+}
+
+function isVerifyDoc(target, ctx) {
+  const rel = relativeToProject(target, ctx.projectDir, process.platform);
+  if (rel === null) return false;
+  const want = ctx.feature ? `${HARNESS_DIR}/work/${ctx.feature}/VERIFY.md` : null;
+  return want !== null && rel.replace(/\\/g, '/') === want;
+}
+
+function onSessionStart() {
+  // Context injection lands in the next step; staying silent is the correct
+  // behavior until then.
+}
+
+function onPrompt() {
+  // Approval and override recording land in the next step.
+}
+
+const DISPATCH = {
+  'session-start': onSessionStart,
+  prompt: onPrompt,
+  'pre-write': onPreWrite,
+  'pre-bash': onPreBash,
+  'pre-mcp': onPreMcp,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § main
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function readStdin() {
+  const chunks = [];
+  for await (const c of process.stdin) chunks.push(c);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function logCrash(home, err) {
+  try {
+    if (!ensureDir(home)) return;
+    appendFileSync(join(home, 'crash.log'), `${new Date().toISOString()} ${err?.stack ?? err}\n`, 'utf8');
+  } catch {
+    /* nothing left to do but stay quiet */
+  }
+}
+
+export async function main(argv = process.argv, env = process.env) {
+  const home = ilHome(env);
+  try {
+    if (env.IL_DISABLE) return 0;
+
+    const mode = argv[2];
+    const handler = Object.prototype.hasOwnProperty.call(DISPATCH, mode) ? DISPATCH[mode] : null;
+    if (!handler) return 0;
+
+    let input = {};
+    try {
+      const parsed = JSON.parse(await readStdin());
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) input = parsed;
+    } catch {
+      /* malformed payload — every field is optional anyway */
+    }
+
+    const projectDir = env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
+
+    // The one check that must be fast: in a repo that does not use the harness,
+    // this is a single stat and then we are gone.
+    if (!existsSync(join(projectDir, HARNESS_DIR))) return 0;
+
+    handler(input, { projectDir, home, feature: currentFeature(projectDir), env });
+    return 0;
+  } catch (err) {
+    // Fail open, always. A bug here must cost the user nothing.
+    logCrash(home, err);
+    return 0;
+  }
+}
+
+const invokedDirectly =
+  typeof process.argv[1] === 'string' && process.argv[1].replace(/\\/g, '/').endsWith('/il.mjs');
+
+if (invokedDirectly) {
+  main().then(
+    (code) => process.exit(code),
+    () => process.exit(0)
+  );
 }

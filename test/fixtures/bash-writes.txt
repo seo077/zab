@@ -169,3 +169,8 @@ NONE :: git commit -m "fix: redirect stdout > to a log"
 NONE :: printf '\x65\x63\x68\x6f' | sh
 NONE :: awk 'BEGIN{print "x" > "src/a.ts"}'
 NONE :: python3 setup.py build
+
+# Git Bash spells C:/x as /c/x, and hooks run under Git Bash on Windows.
+# Extraction keeps the raw string; classify() is what translates it back.
+WRITE:/c/Workspace/proj/src/auth.ts :: echo x > /c/Workspace/proj/src/auth.ts
+WRITE:/cygdrive/c/proj/src/a.ts :: cp /tmp/x.ts /cygdrive/c/proj/src/a.ts

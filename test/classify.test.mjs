@@ -47,6 +47,17 @@ const CASES = [
   // POSIX is case-SENSITIVE: these must not be treated as the same file.
   ['/home/u/PROJ/src/a.ts', POSIX, 'foreign', 'posix case sensitivity is preserved'],
 
+  // Hooks run under Git Bash on Windows (docs/design/platform-facts.md), so a
+  // Bash command can legitimately name a file MSYS-style. Left untranslated,
+  // `/c/...` looks like it is outside the project and walks straight past the gate.
+  ['/c/Workspace/proj/src/auth.ts', WIN, 'code', 'MSYS drive path is a real bypass on Windows'],
+  ['/C/Workspace/proj/src/auth.ts', WIN, 'code', 'MSYS drive letter may be upper case'],
+  ['/cygdrive/c/Workspace/proj/src/auth.ts', WIN, 'code', 'cygwin drive path'],
+  ['/d/other/src/a.ts', WIN, 'foreign', 'a different MSYS drive is still outside'],
+  ['/c/Workspace/proj/README.md', WIN, 'free', 'MSYS path to an allowed file'],
+  // On POSIX these are ordinary directories and must NOT be reinterpreted.
+  ['/c/Workspace/proj/src/a.ts', POSIX, 'foreign', '/c is a normal directory on posix'],
+
   // ─── 4. traversal that stays inside must resolve, not string-match ───────────
   ['/home/u/proj/src/../src/auth.ts', POSIX, 'code', 'traversal resolving back inside'],
   ['/home/u/proj/./src/auth.ts', POSIX, 'code', 'single-dot segment'],

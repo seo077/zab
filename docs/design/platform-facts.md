@@ -162,6 +162,45 @@ Treat **every** field as optional in the parser. A missing field must fail open,
 
 ---
 
+## Measured cost per gated tool call
+
+Windows 11, Node v24.14.0, 20 runs each:
+
+| | |
+|---|---|
+| bare `node -e 0` | **81 ms** |
+| `il.mjs`, repo without `.interlocking/` | 108 ms |
+| `il.mjs`, gate closed, deny emitted | 107 ms |
+
+**Node process startup dominates — our logic costs ~26 ms of it.** On Linux and macOS
+Node starts in roughly half the time, so expect ~40–60 ms there.
+
+Two consequences the design already reflects:
+
+1. **Keep the matchers narrow.** This cost is paid per matching tool call, so `Read`,
+   `Grep` and `Glob` are deliberately not hooked. Only `Edit|Write|MultiEdit|NotebookEdit`,
+   `Bash` and `^mcp__.*` are.
+2. **State it in the README rather than hide it**, and ship `IL_DISABLE=1`.
+
+The `.interlocking/`-missing path is a single `existsSync` before anything else, so a repo
+that does not use the harness pays only Node startup.
+
+## Windows path forms the gate must understand
+
+Three spellings of the same file reach the hook, and treating any of them as "outside the
+project" silently disables the gate:
+
+| Source | Form |
+|---|---|
+| `CLAUDE_PROJECT_DIR` | `C:/Workspace/proj` |
+| `tool_input.file_path` | `C:\Workspace\proj\src\a.ts` |
+| a Bash command (Git Bash) | `/c/Workspace/proj/src/a.ts`, `/cygdrive/c/...` |
+
+The third form is easy to miss: MSYS rewrites path-shaped **environment variables** when it
+launches a native process, but leaves **stdin payloads and command text alone**. So a Bash
+command can name a project file in a spelling the env var never uses. `classify()` translates
+all three; see the MSYS cases in `test/classify.test.mjs`.
+
 ## Still unverified
 
 | | Why it is not blocking |
