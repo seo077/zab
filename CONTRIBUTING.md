@@ -112,3 +112,15 @@ Run before pushing:
 ```bash
 npm test && claude plugin validate . --strict
 ```
+
+**And on the oldest supported Node**, if you touched the runner, the test files or
+anything version-sensitive:
+
+```bash
+npm run test:node18
+```
+
+That one is not paranoia. `node --test` changed what its argument MEANS between 20
+and 21 — a literal path became a glob — so the suite was green on the development
+machine and red on six of nine CI cells. Nothing in the code was wrong; the command
+that ran it was.

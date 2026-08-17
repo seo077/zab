@@ -10,6 +10,8 @@
   "scripts": {
     "test": "node test/run.mjs",
     "validate": "claude plugin validate . --strict",
-    "check": "npm run validate && npm test"
+    "check": "npm run validate && npm test",
+    "test:node18": "npx -y node@18.20.8 test/run.mjs",
+    "test:node20": "npx -y node@20.19.0 test/run.mjs"
   }
 }
