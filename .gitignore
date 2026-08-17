@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# Local scratch, never committed
+scratch/
+
+# NOTE: .interlocking/ is intentionally NOT ignored.
+# Harness artifacts are committed so work can resume on another machine (D-007).

@@ -1,0 +1,16 @@
+{
+  "name": "interlocking",
+  "description": "Interlocking — a hook-enforced development harness for Claude Code.",
+  "owner": {
+    "name": "TODO-your-name"
+  },
+  "plugins": [
+    {
+      "name": "il",
+      "source": "./",
+      "description": "A hook-enforced development harness for Claude Code: spec approval gates that actually block, 30-second session resume, and verification that never saw the implementation.",
+      "category": "workflow",
+      "tags": ["spec-driven", "gates", "verification", "resume"]
+    }
+  ]
+}
