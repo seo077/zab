@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The matrix is not ceremony. tool_input.file_path arrives with backslashes on
+  # Windows while CLAUDE_PROJECT_DIR uses forward slashes, hooks run under Git
+  # Bash, and a Bash command can name the same file as /c/... — all three have to
+  # classify identically or the gate silently blocks nothing.
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test "test/**/*.test.mjs"
+
+  # A hook that crashes shows the user an error on every tool call. This job
+  # exists so that can never reach a release: it drives the real binary with
+  # malformed input and asserts it stays quiet.
+  hook-smoke:
+    name: hook survives bad input
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Hook modes speak the stdout JSON contract to Claude Code. CLI modes are
+      # invoked from a command file's ! block and print prose for a human, so they
+      # are checked for exit code and for not hanging, not for JSON.
+      - name: hook modes — always exit 0/2, always empty or valid JSON
+        shell: bash
+        run: |
+          set -u
+          fail=0
+          for mode in session-start prompt pre-write pre-bash pre-mcp; do
+            for payload in '' 'not json' '{' '[]' 'null' '{"tool_input":"not-an-object"}'; do
+              out=$(printf '%s' "$payload" | node hooks/il.mjs "$mode" 2>/dev/null)
+              code=$?
+              if [ "$code" != "0" ] && [ "$code" != "2" ]; then
+                echo "::error::mode=$mode payload='$payload' exited $code"
+                fail=1
+              fi
+              if [ -n "$out" ]; then
+                printf '%s' "$out" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{JSON.parse(b)}catch(e){process.exit(1)}})' \
+                  || { echo "::error::mode=$mode emitted non-JSON: $out"; fail=1; }
+              fi
+            done
+          done
+          exit $fail
+
+      - name: CLI modes — return without stdin instead of hanging
+        shell: bash
+        run: |
+          set -u
+          fail=0
+          for mode in status check doctor verify-packet; do
+            out=$(node hooks/il.mjs "$mode" < /dev/null 2>/dev/null)
+            code=$?
+            if [ "$code" != "0" ]; then
+              echo "::error::CLI mode=$mode exited $code"
+              fail=1
+            fi
+            if [ -z "$out" ]; then
+              echo "::error::CLI mode=$mode printed nothing; a ! block would render empty"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: unknown modes are a silent no-op
+        shell: bash
+        run: |
+          set -eu
+          out=$(printf '{}' | node hooks/il.mjs definitely-not-a-mode)
+          test -z "$out" || { echo "::error::unknown mode spoke: $out"; exit 1; }
+
+      - name: silent in a repo that does not use the harness
+        shell: bash
+        run: |
+          set -eu
+          tmp=$(mktemp -d)
+          out=$(printf '{}' | CLAUDE_PROJECT_DIR="$tmp" node hooks/il.mjs pre-write)
+          test -z "$out" || { echo "::error::hook spoke up in an unrelated repo: $out"; exit 1; }
+
+  validate:
+    name: plugin manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude plugin validate . --strict
+
+  syntax:
+    name: syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: |
+          for f in $(git ls-files '*.mjs'); do node --check "$f"; done
+      - name: manifests and templates are valid JSON
+        run: |
+          for f in $(git ls-files '*.json'); do
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" || exit 1
+          done
