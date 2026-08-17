@@ -162,6 +162,25 @@ test('uncommitted leftovers produce a QUESTION, never a decision', () => {
   assert.doesNotMatch(out, /\bI will (discard|keep|continue)\b/i, 'the hook must not choose');
 });
 
+test('uncommitted HARNESS files alone are a note, not a blocking question', () => {
+  // Found by dogfooding: /il:new writes SPEC.md and STATE.md, then the very next
+  // /il:next stops to ask what to do about them. The harness was interrogating
+  // the human about files it had just created itself. The question exists to
+  // protect half-finished IMPLEMENTATION work, which this is not.
+  const dirty = ['.interlocking/current', '.interlocking/work/001-login/SPEC.md', '.interlocking/CONTEXT.md'];
+  const out = composeSessionContext(ctx({ git: { ...CLEAN_GIT, dirty } }));
+  assert.doesNotMatch(out, /ACTION REQUIRED/, 'harness artifacts must not stall the flow');
+  assert.match(out, /uncommitted/i, 'but they are still mentioned');
+  assert.match(out, /commit/i, 'with the obvious next step');
+});
+
+test('one uncommitted source file among harness files still asks', () => {
+  const dirty = ['.interlocking/work/001-login/SPEC.md', 'src/auth/session.ts'];
+  const out = composeSessionContext(ctx({ git: { ...CLEAN_GIT, dirty } }));
+  assert.match(out, /ACTION REQUIRED/);
+  assert.match(out, /src\/auth\/session\.ts/);
+});
+
 test('a clean tree asks nothing', () => {
   const out = composeSessionContext(ctx());
   assert.doesNotMatch(out, /ACTION REQUIRED/);

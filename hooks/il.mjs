@@ -1459,7 +1459,15 @@ export function composeSessionContext(ctx) {
       if (git.op) {
         questions.push(`The repo is mid-${git.op}. Ask the human to resolve that before resuming.`);
       }
-      if (dirty.length) {
+      // Harness artifacts on their own are not a resume hazard — they are what
+      // the previous phase just produced. Stopping to ask about them means the
+      // harness interrogates the human about files it created itself, one command
+      // earlier. The question is here to protect half-finished IMPLEMENTATION work.
+      const harnessOnly = dirty.length > 0 && dirty.every((p) => p.replace(/\\/g, '/').startsWith(HARNESS_DIR + '/'));
+      if (dirty.length && harnessOnly) {
+        out.push('');
+        out.push(`[il] ${dirty.length} uncommitted harness file(s) — commit them as a checkpoint when convenient.`);
+      } else if (dirty.length) {
         const shown = dirty.slice(0, DIRTY_SHOWN).join(', ');
         const more = dirty.length > DIRTY_SHOWN ? ` (+${dirty.length - DIRTY_SHOWN} more)` : '';
         questions.push(
