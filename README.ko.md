@@ -9,7 +9,7 @@
 소스를 편집할 수 없고, 어떻게 요청받든 스스로 승인할 수도 없습니다.**
 
 ```
-/plugin marketplace add <you>/interlocking
+/plugin marketplace add seo077/interlocking
 /plugin install il@interlocking
 ```
 

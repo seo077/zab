@@ -10,7 +10,7 @@ approved the spec, the agent cannot edit source — and it cannot approve the sp
 itself, however it is asked.
 
 ```
-/plugin marketplace add <you>/interlocking
+/plugin marketplace add seo077/interlocking
 /plugin install il@interlocking
 ```
 

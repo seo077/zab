@@ -23,7 +23,7 @@ the file is worth more than an unknown one in the wild.
 Node 18+ and Claude Code. No dependencies, and it stays that way.
 
 ```bash
-git clone <repo> && cd interlocking
+git clone https://github.com/seo077/interlocking.git && cd interlocking
 npm test                          # node --test, no install step
 claude plugin validate . --strict
 

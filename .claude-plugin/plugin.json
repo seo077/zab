@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "A hook-enforced development harness for Claude Code: spec approval gates that actually block, 30-second session resume, and verification that never saw the implementation.",
   "author": {
-    "name": "TODO-your-name"
+    "name": "seo077"
   },
   "keywords": [
     "spec-driven",
