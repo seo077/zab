@@ -1,0 +1,28 @@
+{
+  "$comment": "SPIKE WIRING — points at the throwaway probe. Replaced by hooks/il.mjs in step 5.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/test/probe/probe.mjs\" plugin-session-start || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/test/probe/probe.mjs\" plugin-prompt || true"
+          }
+        ]
+      }
+    ]
+  }
+}

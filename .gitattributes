@@ -1,0 +1,9 @@
+# LF everywhere. The harness hashes SPEC.md to decide whether an approval is still
+# valid, so a checkout that silently rewrites line endings would invalidate approvals
+# on Windows. normalizeSpec() defends against this too, but not needing the defense
+# is better.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary

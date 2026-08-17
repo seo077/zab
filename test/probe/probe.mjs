@@ -102,10 +102,10 @@ try {
   }
 
   const mode = process.argv[2] || 'unknown';
-  const label = parsed?.hook_event_name || mode;
-  capture(label, raw, parsed, parseError);
+  // Label by BOTH so settings-based and plugin-based wiring can be told apart.
+  capture(`${parsed?.hook_event_name || 'NOEVENT'}--${mode}`, raw, parsed, parseError);
 
-  if (mode === 'session-start') {
+  if (mode === 'session-start' || mode === 'plugin-session-start') {
     // Q4: does this text land in the model's context?
     emit({
       hookSpecificOutput: {
@@ -113,7 +113,7 @@ try {
         additionalContext: `${S.ssCtx} — il probe active. SessionStart injection works if you can read this.`,
       },
     });
-  } else if (mode === 'prompt') {
+  } else if (mode === 'prompt' || mode === 'plugin-prompt') {
     // Q1 is answered by the captured fixture (does `prompt` hold the raw slash text?).
     // Q2 is answered by which of these two sentinels the model can quote back.
     emit({

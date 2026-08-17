@@ -1,0 +1,42 @@
+{
+  "captured_argv": [
+    "pre-write"
+  ],
+  "env_present": {
+    "CLAUDE_PLUGIN_ROOT": null,
+    "CLAUDE_PLUGIN_DATA": null,
+    "CLAUDE_PROJECT_DIR": "C:/Workspace/interlocking",
+    "CLAUDE_SESSION_ID": null,
+    "CLAUDE_SKILL_DIR": null,
+    "CLAUDE_ENV_FILE": null
+  },
+  "shell": {
+    "platform": "win32",
+    "shell": "C:\\Program Files\\Git\\bin\\bash.exe",
+    "comspec": "C:\\WINDOWS\\system32\\cmd.exe",
+    "msystem": "MINGW64",
+    "node": "v24.14.0",
+    "cwd": "C:\\Workspace\\interlocking"
+  },
+  "stdin_raw_length": 576,
+  "stdin_parse_error": null,
+  "stdin": {
+    "session_id": "00000000-0000-4000-8000-000000000009",
+    "transcript_path": "C:\\Users\\USER\\.claude\\projects\\C--Workspace-interlocking\\00000000-0000-4000-8000-000000000009.jsonl",
+    "cwd": "C:\\Workspace\\interlocking",
+    "prompt_id": "00000000-0000-4000-8000-000000000009",
+    "permission_mode": "default",
+    "agent_id": "a01fd10a679bb9664",
+    "agent_type": "general-purpose",
+    "effort": {
+      "level": "high"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Write",
+    "tool_input": {
+      "file_path": "C:\\Workspace\\interlocking\\sub-IL_DENY_PROBE.txt",
+      "content": "x"
+    },
+    "tool_use_id": "toolu_0114ZPEGHKfYMsrWP9YDGTf1"
+  }
+}
