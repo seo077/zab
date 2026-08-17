@@ -18,6 +18,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, statSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -985,6 +986,180 @@ function leaseIsLive(lease) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// § state — reading STATE.md and composing the SessionStart injection
+//
+// This text is prepended to EVERY session, so it is charged against the context
+// budget forever. Hence a hard cap enforced in code rather than by good
+// intentions, paths instead of contents, and last-3 history entries only.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const SESSION_CONTEXT_MAX_LINES = 45;
+export const SESSION_CONTEXT_MAX_CHARS = 3000;
+const BRIEF_MAX_LINES = 8;
+const HISTORY_SHOWN = 3;
+const DIRTY_SHOWN = 8;
+
+function sectionLines(body, heading) {
+  if (typeof body !== 'string') return [];
+  const lines = body.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim().toLowerCase() === heading.toLowerCase());
+  if (start === -1) return [];
+  const out = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^#{1,6}\s/.test(lines[i])) break;
+    const t = lines[i].trim();
+    // The templates carry their instructions in HTML comments. Injecting those
+    // into every session would spend the budget explaining the format to itself.
+    if (!t || t.startsWith('<!--')) continue;
+    out.push(lines[i].trimEnd());
+  }
+  return out;
+}
+
+export function resumeBrief(body) {
+  return sectionLines(body, '## Resume brief').slice(0, BRIEF_MAX_LINES);
+}
+
+/** History is append-only, newest last, so "recent" means the tail. */
+export function historyEntries(body, n = HISTORY_SHOWN) {
+  const all = sectionLines(body, '## History').filter((l) => l.trim().startsWith('-'));
+  return n > 0 ? all.slice(-n) : all;
+}
+
+function truncate(s, max) {
+  const str = String(s ?? '');
+  return str.length <= max ? str : str.slice(0, max - 1) + '…';
+}
+
+/**
+ * @returns {string} the text injected at SessionStart. Pure — git and gate facts
+ *   are gathered by the caller so this stays testable.
+ */
+export function composeSessionContext(ctx) {
+  try {
+    const feature = ctx?.feature ?? null;
+    const gate = ctx?.gate ?? {};
+    const git = ctx?.git ?? {};
+    const data = ctx?.state?.data ?? {};
+    const body = ctx?.state?.body ?? '';
+    const source = ctx?.source ?? 'startup';
+
+    if (!feature) {
+      return [
+        '[il] interlocking is installed; no feature is active.',
+        '     Start one with  /il:new <goal>   (or /il:onboard for an existing repo)',
+      ].join('\n');
+    }
+
+    const work = `${HARNESS_DIR}/work/${feature}`;
+    const out = [];
+
+    if (source === 'compact') out.push('[il] context was compacted; re-anchoring:');
+
+    const gateLabel = gate.open
+      ? gate.lease
+        ? 'G0 bypassed by override lease'
+        : 'G0 approved'
+      : gate.why || 'G0 not approved';
+    out.push(`[il] ${feature} · ${data.phase ?? 'UNKNOWN'} · ${gateLabel}`);
+    out.push(`Resume anchor: ${work}/STATE.md`);
+
+    // STATE.md is a human-readable mirror; the signed store is the authority.
+    // When they disagree, say so loudly rather than quietly trusting either.
+    const claims = Array.isArray(data.gates_passed) ? data.gates_passed : [];
+    if (claims.includes('G0') && !gate.open) {
+      out.push('');
+      out.push('⚠ STATE.md claims G0 is passed, but no valid approval backs it.');
+      out.push('  Either SPEC.md changed after approval, or that line was written without one.');
+      out.push('  Edits stay blocked. STATE.md is a mirror, never the authority.');
+    }
+
+    out.push('');
+    out.push(`NEXT: ${truncate(data.next_action ?? '(not recorded — read STATE.md)', 160)}`);
+    if (data.blocked_on) out.push(`BLOCKED ON: ${truncate(data.blocked_on, 120)}`);
+
+    const brief = resumeBrief(body);
+    if (brief.length) {
+      out.push('');
+      out.push(...brief.map((l) => truncate(l, 120)));
+    }
+
+    const asm = Array.isArray(data.open_assumptions) ? data.open_assumptions.slice(0, 8) : [];
+    if (asm.length) out.push(`Open assumptions: ${asm.join(', ')}`);
+
+    const hist = historyEntries(body, HISTORY_SHOWN);
+    if (hist.length) out.push(`Recent: ${truncate(hist.map((h) => h.replace(/^-\s*/, '')).join(' | '), 200)}`);
+
+    if (gate.lease) {
+      out.push('');
+      out.push(`⚠ Files were written under an override (reason: ${truncate(gate.lease.reason, 60)}).`);
+      out.push(`  ${work}/VERIFY.md must account for them.`);
+    }
+
+    out.push('');
+    out.push('Rules in force:');
+    out.push('- STATE.md is the source of truth. Read it before acting.');
+    if (gate.open) {
+      out.push('- Code edits are unlocked. Editing SPEC.md invalidates the approval.');
+    } else {
+      out.push('- Code edits are BLOCKED until the human types  /il:approve');
+      out.push(`- Docs, markdown and ${HARNESS_DIR}/** are never blocked — keep planning.`);
+    }
+    out.push('- After each finished task: update next_action and append one history line.');
+
+    // Leftovers are surfaced as a question. Auto-discarding loses work and
+    // auto-continuing builds on a state nobody has looked at.
+    const questions = [];
+    if (!git.isRepo) {
+      questions.push(
+        'No git repo here, so il cannot detect uncommitted work. STATE.md history is the only record.',
+        `Ask the human: "STATE.md says the next step is ${truncate(data.next_action ?? '(unrecorded)', 60)}. Is that still accurate?"`
+      );
+    } else {
+      const dirty = Array.isArray(git.dirty) ? git.dirty : [];
+      if (git.op) {
+        questions.push(`The repo is mid-${git.op}. Ask the human to resolve that before resuming.`);
+      }
+      if (dirty.length) {
+        const shown = dirty.slice(0, DIRTY_SHOWN).join(', ');
+        const more = dirty.length > DIRTY_SHOWN ? ` (+${dirty.length - DIRTY_SHOWN} more)` : '';
+        questions.push(
+          `${dirty.length} file(s) have uncommitted changes: ${truncate(shown, 300)}${more}`,
+          'Ask the human, and do not decide for them: (a) finish this work  (b) discard and restart the task  (c) show me the diff first'
+        );
+      }
+      if (git.head && data.head_commit && git.head !== data.head_commit) {
+        questions.push(
+          `HEAD moved since STATE.md was written (${data.head_commit} → ${git.head}). Ask the human whether work landed elsewhere.`
+        );
+      }
+    }
+
+    if (questions.length && !ctx?.askedDirty) {
+      out.push('');
+      out.push('[il] ACTION REQUIRED — resolve with the human before anything else:');
+      out.push(...questions.map((q) => `  ${q}`));
+    }
+
+    return capBudget(out);
+  } catch {
+    return '';
+  }
+}
+
+/** The cap is enforced here so no caller can forget it. */
+function capBudget(lines) {
+  let out = lines.join('\n');
+  if (out.split('\n').length > SESSION_CONTEXT_MAX_LINES) {
+    out = lines.slice(0, SESSION_CONTEXT_MAX_LINES - 1).join('\n') + '\n[il] …truncated to stay within the context budget.';
+  }
+  if (out.length > SESSION_CONTEXT_MAX_CHARS) {
+    out = out.slice(0, SESSION_CONTEXT_MAX_CHARS - 60) + '\n[il] …truncated to stay within the context budget.';
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // § out — the stdout contract
 //
 // Silence means allow, and lets the normal permission system do its job.
@@ -1138,9 +1313,151 @@ function isVerifyDoc(target, ctx) {
   return want !== null && rel.replace(/\\/g, '/') === want;
 }
 
-function onSessionStart() {
-  // Context injection lands in the next step; staying silent is the correct
-  // behavior until then.
+// ─────────────────────────────────────────────────────────────────────────────
+// § git — only ever called from session-start, never on the hot path
+// ─────────────────────────────────────────────────────────────────────────────
+
+const IN_PROGRESS_MARKERS = [
+  ['merge', 'MERGE_HEAD'],
+  ['rebase', 'rebase-merge'],
+  ['rebase', 'rebase-apply'],
+  ['cherry-pick', 'CHERRY_PICK_HEAD'],
+  ['revert', 'REVERT_HEAD'],
+  ['bisect', 'BISECT_LOG'],
+];
+
+export function gitInfo(projectDir) {
+  const run = (args) => {
+    try {
+      return execFileSync('git', args, {
+        cwd: projectDir,
+        timeout: 2000,
+        windowsHide: true,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        maxBuffer: 4 * 1024 * 1024,
+      }).trim();
+    } catch {
+      return null; // git missing, timed out, or not a repo — all handled the same
+    }
+  };
+
+  const top = run(['rev-parse', '--show-toplevel']);
+  if (top === null) return { isRepo: false, dirty: [], head: null, op: null };
+
+  const porcelain = run(['status', '--porcelain=v1']) ?? '';
+  const dirty = porcelain
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => l.slice(3).trim())
+    .filter(Boolean);
+
+  let op = null;
+  for (const [name, marker] of IN_PROGRESS_MARKERS) {
+    if (existsSync(join(top, '.git', marker))) {
+      op = name;
+      break;
+    }
+  }
+
+  return { isRepo: true, dirty, head: run(['rev-parse', '--short', 'HEAD']), op };
+}
+
+function loadState(projectDir, feature) {
+  if (!feature) return { data: {}, body: '' };
+  const raw = readTextSafe(join(projectDir, HARNESS_DIR, 'work', feature, 'STATE.md'));
+  return parseFrontmatter(raw ?? '');
+}
+
+/**
+ * The leftovers question is asked once per session. Without this, every
+ * compaction would re-ask it and the human would learn to ignore it.
+ */
+function sessionFlagPath(home, pid, sessionId) {
+  const safe = /^[A-Za-z0-9._-]+$/.test(String(sessionId ?? '')) ? String(sessionId) : null;
+  return safe ? join(storeDir(home, pid), 'session', `${safe}.json`) : null;
+}
+
+function hasAskedDirty(home, pid, sessionId) {
+  const p = sessionFlagPath(home, pid, sessionId);
+  return p ? readJsonSafe(p)?.asked_dirty === true : false;
+}
+
+function markAskedDirty(home, pid, sessionId) {
+  const p = sessionFlagPath(home, pid, sessionId);
+  if (!p || !ensureDir(join(storeDir(home, pid), 'session'))) return;
+  try {
+    writeFileSync(p, JSON.stringify({ asked_dirty: true, at: new Date().toISOString() }), 'utf8');
+  } catch {
+    /* best effort — worst case the question is asked twice */
+  }
+}
+
+function onSessionStart(input, ctx) {
+  const state = loadState(ctx.projectDir, ctx.feature);
+  const git = ctx.feature ? gitInfo(ctx.projectDir) : { isRepo: false, dirty: [], head: null, op: null };
+  const gate = gateState(ctx);
+  const pid = projectId(ctx.projectDir);
+  const askedDirty = hasAskedDirty(ctx.home, pid, input?.session_id);
+
+  const text = composeSessionContext({
+    feature: ctx.feature,
+    state,
+    git,
+    gate,
+    source: input?.source,
+    askedDirty,
+  });
+  if (!text) return;
+
+  emit({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } });
+
+  if (!askedDirty && (git.dirty.length || git.op)) markAskedDirty(ctx.home, pid, input?.session_id);
+}
+
+/**
+ * `status` is a CLI mode, not a hook event: `/il:status` injects its output with
+ * a `!` block. Keeping the reporting here means the command file cannot drift
+ * from what the hook actually enforces.
+ */
+function onStatus(_input, ctx) {
+  const state = loadState(ctx.projectDir, ctx.feature);
+  const gate = gateState(ctx);
+  const git = gitInfo(ctx.projectDir);
+  const d = state.data;
+  const lines = [];
+
+  if (!ctx.feature) {
+    lines.push('interlocking: installed, no active feature.', 'Start one with /il:new <goal>.');
+  } else {
+    lines.push(`feature   ${ctx.feature}`);
+    lines.push(`phase     ${d.phase ?? '(unrecorded)'}`);
+    lines.push(`gate      ${gate.open ? 'OPEN' : 'CLOSED'} — ${gate.why}${gate.degraded ? ' (advisory mode)' : ''}`);
+    const claims = Array.isArray(d.gates_passed) ? d.gates_passed : [];
+    if (claims.includes('G0') && !gate.open) {
+      lines.push('          ⚠ STATE.md claims G0 but no valid approval backs it (mirror, not authority)');
+    }
+    lines.push(`next      ${d.next_action ?? '(unrecorded)'}`);
+    if (d.blocked_on) lines.push(`blocked   ${d.blocked_on}`);
+    const asm = Array.isArray(d.open_assumptions) ? d.open_assumptions : [];
+    if (asm.length) lines.push(`open ASM  ${asm.join(', ')}`);
+    if (gate.lease) {
+      lines.push(`override  active — reason: ${gate.lease.reason}, ${gate.lease.edits_used ?? 0}/${gate.lease.max_edits ?? '?'} edits used`);
+    }
+    lines.push(`spec      ${HARNESS_DIR}/work/${ctx.feature}/SPEC.md`);
+  }
+
+  if (!git.isRepo) {
+    lines.push('git       not a repo — il cannot detect uncommitted work');
+  } else {
+    lines.push(`git       HEAD ${git.head ?? '?'}${git.op ? `, mid-${git.op}` : ''}, ${git.dirty.length} uncommitted file(s)`);
+    if (git.dirty.length) lines.push(`          ${git.dirty.slice(0, 10).join(', ')}`);
+    if (git.head && d.head_commit && git.head !== d.head_commit) {
+      lines.push(`          ⚠ HEAD moved since STATE.md (${d.head_commit} → ${git.head})`);
+    }
+  }
+
+  process.stdout.write(lines.join('\n') + '\n');
 }
 
 function onPrompt() {
@@ -1153,7 +1470,11 @@ const DISPATCH = {
   'pre-write': onPreWrite,
   'pre-bash': onPreBash,
   'pre-mcp': onPreMcp,
+  status: onStatus,
 };
+
+/** Modes invoked from a command file rather than by a hook event. */
+const CLI_MODES = new Set(['status']);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // § main
@@ -1195,7 +1516,14 @@ export async function main(argv = process.argv, env = process.env) {
 
     // The one check that must be fast: in a repo that does not use the harness,
     // this is a single stat and then we are gone.
-    if (!existsSync(join(projectDir, HARNESS_DIR))) return 0;
+    if (!existsSync(join(projectDir, HARNESS_DIR))) {
+      if (CLI_MODES.has(mode)) {
+        process.stdout.write(
+          `interlocking: not initialised in ${projectDir}\nRun /il:new <goal> to start, or /il:onboard for an existing repo.\n`
+        );
+      }
+      return 0;
+    }
 
     handler(input, { projectDir, home, feature: currentFeature(projectDir), env });
     return 0;
