@@ -1,5 +1,6 @@
 ---
 description: Run the next ready task in a fresh subagent, commit it, and update the resume anchor.
+allowed-tools: Bash(node:*)
 ---
 
 ## Current state

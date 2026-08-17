@@ -1,5 +1,6 @@
 ---
 description: Bring an existing repository under interlocking — write CONTEXT.md and tune policy.json without gating work already done.
+allowed-tools: Bash(node:*)
 ---
 
 ## Current state

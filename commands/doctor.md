@@ -1,10 +1,11 @@
 ---
 description: Check what interlocking can actually enforce on this installation.
+allowed-tools: Bash(node:*)
 ---
 
 ## Environment
 
-!`node "${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs" doctor`
+!`node "${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs" doctor "${CLAUDE_PLUGIN_ROOT}"`
 
 ---
 

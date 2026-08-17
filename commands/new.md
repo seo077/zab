@@ -1,6 +1,7 @@
 ---
 description: Start a new feature — sizing, research, interview, threat model, spec, then ask a human to approve it.
 argument-hint: "<what you want to build>"
+allowed-tools: Bash(node:*)
 ---
 
 ## Current state

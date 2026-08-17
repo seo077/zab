@@ -1,6 +1,6 @@
 ---
 description: Show where this feature stands — phase, gate, next action, open assumptions, uncommitted work.
-allowed-tools: []
+allowed-tools: Bash(node:*)
 ---
 
 ## Current state

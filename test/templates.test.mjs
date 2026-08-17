@@ -111,6 +111,31 @@ test('the agent named in policy.json actually ships', () => {
   assert.ok(names.includes('il-verifier'), `agents/ has ${names.join(', ')}`);
 });
 
+test('a command that runs a ! block declares permission to run it', () => {
+  // Found by dogfooding, not by testing. A `!`cmd`` block whose command is not
+  // permitted makes the WHOLE command silently do nothing: zero turns, empty
+  // output, no error anywhere. Seven of nine commands shipped that way and every
+  // unit test was green.
+  const dir = join(ROOT, 'commands');
+  for (const name of readdirSync(dir)) {
+    const text = readFileSync(join(dir, name), 'utf8');
+    const { data, body } = parseFrontmatter(text);
+    const bang = /^\s*!`([^`]+)`/m.exec(body);
+    if (!bang) continue;
+
+    const allowed = data['allowed-tools'];
+    assert.ok(
+      allowed !== undefined && allowed !== '' && String(allowed) !== '[]',
+      `commands/${name} runs \`${bang[1].slice(0, 40)}…\` but declares no allowed-tools — it will silently produce nothing`
+    );
+    assert.match(
+      String(allowed),
+      /Bash/,
+      `commands/${name} runs a shell command, so allowed-tools must include Bash (got: ${allowed})`
+    );
+  }
+});
+
 test('every command referenced in a deny or approval message exists', () => {
   // These strings are shown to the model and to the human as instructions. An
   // unregistered slash command skips hooks entirely, so a message pointing at a

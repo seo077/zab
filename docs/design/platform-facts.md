@@ -219,3 +219,49 @@ claude -p "il approve G0" --max-turns 1     # then read test/fixtures/events/
 
 `/il:doctor` performs a subset of these checks against the user's own installation and degrades
 the gate from `enforce` to `advisory` when a prerequisite is missing.
+
+---
+
+## Found by dogfooding, not by testing
+
+Three defects survived 300 green unit tests and were only visible when the plugin
+was installed and driven end to end. All three are silent — nothing errors, nothing
+logs, the wrong thing simply happens.
+
+### A `!` block needs permission, or the whole command does nothing
+
+A command file containing ``!`node …` `` without `allowed-tools` produces
+**`num_turns: 0`, empty output, no error**. Not a degraded command — no command at
+all. `!`echo …`` works, because `echo` is already permitted; `node` is not.
+
+Seven of nine shipped commands were in this state, including `/il:status` and
+`/il:new`. Fix: `allowed-tools: Bash(node:*)`. Guarded by a test that reads every
+command file and fails if a `!` block is undeclared.
+
+### Hook-only env vars split the store in two
+
+`CLAUDE_PLUGIN_DATA` is set for hook processes but **not** for the `!` blocks that
+`/il:status` and `/il:doctor` run from. With it in the store-location ladder, the
+same `status` command reported:
+
+```
+CLI  (! block):  gate CLOSED — G0 not approved
+HOOK          :  gate OPEN   — G0 approved
+```
+
+Same project, same second. The command whose entire job is to report the enforced
+state was reporting a different one. Fix: the store location depends on nothing
+that varies by calling context — `IL_HOME` (explicit user choice) or
+`~/.interlocking`, never `CLAUDE_PLUGIN_DATA`.
+
+### `allowed-tools: []` and "now update STATE.md" cannot both be true
+
+`commands/approve.md` gave the model no tools so it could not meddle, while the
+hook's message told it to mirror the approval into `STATE.md`. It silently did
+nothing, and `/il:status` then read an empty `gates_passed` forever.
+
+Fix: `allowed-tools: Edit(.interlocking/**), Read` — scoped to the harness
+directory, so the instruction is possible and still bounded.
+
+**The pattern in all three:** unit tests check what a function returns. These are
+failures of *integration with the platform*, and every one of them is quiet.

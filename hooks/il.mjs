@@ -1115,11 +1115,20 @@ Do not propose fixes. Do not soften a FAIL because the work is nearly there.
  * decorative. `STATE.md`'s `gates_passed` is a human-readable mirror only; the
  * hook never consults it.
  *
- * Ladder, most specific first. CLAUDE_PLUGIN_DATA exists on 2.1.233 but not on
- * older builds (see docs/design/platform-facts.md), so it is never assumed.
+ * The location deliberately depends on NOTHING that varies between how il is
+ * invoked. `CLAUDE_PLUGIN_DATA` was in this ladder and had to come out: it is set
+ * for hook processes but not for the `!` blocks that /il:status and /il:doctor run
+ * from, so the two disagreed about where the store was. The same `status` command
+ * reported CLOSED from the command file and OPEN from the hook, on the same
+ * project, at the same moment — which is worse than either answer alone, because
+ * the command whose whole job is to report the enforced state was reporting a
+ * different one.
+ *
+ * `IL_HOME` stays, for tests and for anyone who wants the store elsewhere. It is
+ * an explicit choice by the user, not an accident of the calling context.
  */
 export function ilHome(env = process.env) {
-  return env.IL_HOME || env.CLAUDE_PLUGIN_DATA || join(homedir(), '.interlocking');
+  return env.IL_HOME || join(homedir(), '.interlocking');
 }
 
 /** Stable per-project key. realpath so that symlinked checkouts agree. */
@@ -1629,9 +1638,12 @@ function decideWrites(targets, denyTags, input, ctx) {
   const specRel = gate.feature
     ? `${HARNESS_DIR}/work/${gate.feature}/SPEC.md`
     : `${HARNESS_DIR}/`;
+  // A 180-character absolute path buries the one word that matters. Show it the
+  // way the human refers to it.
+  const shown = gated[0] ? relativeToProject(gated[0], ctx.projectDir, process.platform) ?? gated[0] : null;
   const what = denyTags.length
     ? `a command that cannot be checked statically (${denyTags.join(', ')})`
-    : gated[0];
+    : shown;
 
   audit(ctx.home, pid, {
     at: new Date().toISOString(),
@@ -1878,11 +1890,17 @@ function onDoctor(_input, ctx) {
   out.push(`git       ${git ?? '✗ not found — resume cannot detect uncommitted work'}`);
   out.push(`platform  ${process.platform}${process.env.MSYSTEM ? ` (${process.env.MSYSTEM})` : ''}`);
 
+  // Env vars are set for HOOK processes. A `!` block in a command file only gets
+  // ${CLAUDE_PLUGIN_ROOT} textually substituted into its command string, so
+  // reporting their absence here as a failure makes a healthy install look broken.
+  // The command passes the substituted root through as an argument instead.
+  const rootArg = process.argv[3];
   out.push('');
-  out.push('plugin environment');
-  out.push(`  ${ok(!!process.env.CLAUDE_PLUGIN_ROOT)} CLAUDE_PLUGIN_ROOT   ${process.env.CLAUDE_PLUGIN_ROOT ?? '(absent — expected when run outside a plugin hook)'}`);
-  out.push(`  ${ok(!!process.env.CLAUDE_PLUGIN_DATA)} CLAUDE_PLUGIN_DATA   ${process.env.CLAUDE_PLUGIN_DATA ?? '(absent on older builds — il falls back to ~/.interlocking)'}`);
-  out.push(`  ${ok(!!process.env.CLAUDE_PROJECT_DIR)} CLAUDE_PROJECT_DIR   ${process.env.CLAUDE_PROJECT_DIR ?? '(absent — falling back to cwd)'}`);
+  out.push('plugin');
+  out.push(`  ${ok(!!(rootArg || process.env.CLAUDE_PLUGIN_ROOT))} plugin root         ${rootArg || process.env.CLAUDE_PLUGIN_ROOT || '(unknown — pass it as an argument)'}`);
+  out.push(`  ${ok(true)} project             ${ctx.projectDir}`);
+  out.push('  · CLAUDE_PLUGIN_DATA / CLAUDE_PROJECT_DIR are set for hook processes only,');
+  out.push('    so they are not visible from this command. Absence here means nothing.');
 
   const key = loadKey(ctx.home);
   out.push('');

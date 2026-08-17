@@ -1,6 +1,7 @@
 ---
 description: Judge the implemented requirements with a verifier that never saw the implementation.
 argument-hint: "[<from>..<to>]"
+allowed-tools: Bash(node:*)
 ---
 
 ## Current state

@@ -1,6 +1,6 @@
 ---
 description: Pick up an interrupted feature — read the resume anchor and settle any uncommitted work with the human first.
-allowed-tools: []
+allowed-tools: Bash(node:*)
 ---
 
 ## Current state
