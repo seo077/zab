@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test "test/**/*.test.mjs"
+      - run: node test/run.mjs
 
   # A hook that crashes shows the user an error on every tool call. This job
   # exists so that can never reach a release: it drives the real binary with

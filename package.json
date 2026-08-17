@@ -8,7 +8,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.mjs\"",
+    "test": "node test/run.mjs",
     "validate": "claude plugin validate . --strict",
     "check": "npm run validate && npm test"
   }
