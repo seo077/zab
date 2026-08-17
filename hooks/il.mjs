@@ -15,6 +15,8 @@
  *     That is also what makes it testable.
  */
 
+import { createHash } from 'node:crypto';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // § paths — path classification
 //
@@ -587,5 +589,168 @@ export function analyzeBash(cmd) {
   } catch {
     // A parser bug must never block the user's work.
     return { writes: [], denyTag: null };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § hash — what exactly does an approval bind to?
+//
+// An approval records the hash of the SPEC's *normative region*. Get this wrong
+// in either direction and the gate misbehaves:
+//   - too sensitive: cloning the repo on another OS rewrites line endings and
+//     silently revokes every approval
+//   - too permissive: a requirement gets rewritten while the approval still stands
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NORMATIVE_MARKER = /<!--\s*il:normative:(begin|end)\s*-->/g;
+
+/**
+ * Cosmetic differences that must not invalidate an approval: BOM, line endings,
+ * trailing whitespace, runs of blank lines, leading/trailing blank lines.
+ * Leading indentation is deliberately preserved — it changes markdown meaning.
+ */
+export function normalizeText(text) {
+  let s = typeof text === 'string' ? text : String(text ?? '');
+  if (s.charCodeAt(0) === 0xfeff) s = s.slice(1);
+  s = s.replace(/\r\n?/g, '\n');
+  s = s
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/, ''))
+    .join('\n');
+  s = s.replace(/\n{3,}/g, '\n\n');
+  return s.replace(/^\n+/, '').replace(/\n+$/, '');
+}
+
+/**
+ * The part of a SPEC that binds an approval, delimited by
+ * `<!-- il:normative:begin -->` / `<!-- il:normative:end -->`.
+ *
+ * This is what lets a typo in the background section be fixed without a
+ * re-approval, while any change to a REQ still invalidates one. Absent or
+ * malformed markers fall back to the whole document — over-invalidating is
+ * annoying, under-invalidating is a hole.
+ */
+export function normativeRegion(text) {
+  const s = typeof text === 'string' ? text : String(text ?? '');
+  const re = new RegExp(NORMATIVE_MARKER.source, 'g');
+  const parts = [];
+  let openAt = null;
+  let sawMarker = false;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    sawMarker = true;
+    if (m[1] === 'begin') {
+      if (openAt === null) openAt = m.index + m[0].length;
+    } else if (openAt !== null) {
+      parts.push(s.slice(openAt, m.index));
+      openAt = null;
+    }
+  }
+  if (!sawMarker || openAt !== null || parts.length === 0) return s;
+  return parts.join('\n');
+}
+
+export function sha256hex(text) {
+  const s = typeof text === 'string' ? text : String(text ?? '');
+  return createHash('sha256').update(s, 'utf8').digest('hex');
+}
+
+/** The value recorded in an approval token and compared against on every write. */
+export function specHash(text) {
+  try {
+    return sha256hex(normalizeText(normativeRegion(text)));
+  } catch {
+    return sha256hex('');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § fm — frontmatter
+//
+// STATE.md is restricted to a flat YAML subset so the harness needs no YAML
+// dependency. The parser runs on every SessionStart, so it must never throw:
+// anything it does not understand is skipped, not fatal.
+// Supported: `key: scalar`, `key: "quoted"`, `key: [a, b]`, null/true/false/number.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function unquote(v) {
+  if (v.length >= 2) {
+    const q = v[0];
+    if ((q === '"' || q === "'") && v.endsWith(q)) return v.slice(1, -1);
+  }
+  return null;
+}
+
+function parseScalar(rawValue) {
+  let v = rawValue.trim();
+  if (v === '') return null;
+
+  const quoted = unquote(v);
+  if (quoted !== null) return quoted;
+
+  // ` #` starts a comment; `c#d` does not.
+  const hash = v.search(/\s+#/);
+  if (hash !== -1) v = v.slice(0, hash).trim();
+  if (v === '') return null;
+
+  if (v.startsWith('[')) {
+    if (!v.endsWith(']')) return v; // malformed — keep the raw text rather than guess
+    const inner = v.slice(1, -1).trim();
+    if (inner === '') return [];
+    return inner.split(',').map((item) => {
+      const t = item.trim();
+      return unquote(t) ?? t;
+    });
+  }
+
+  if (v === 'null' || v === '~') return null;
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  // Strict number form only. `007` is an identifier, `0x10` is a string, and
+  // `yes` is not a boolean — YAML's looser rules cause more bugs than they solve.
+  if (/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/.test(v)) return Number(v);
+  return v;
+}
+
+const KEY_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
+/**
+ * @param {string} text
+ * @returns {{data: Record<string, unknown>, body: string}}
+ *   No frontmatter, or an unterminated fence, returns `{data:{}, body:text}` verbatim.
+ */
+export function parseFrontmatter(text) {
+  const fallback = { data: {}, body: typeof text === 'string' ? text : '' };
+  try {
+    if (typeof text !== 'string') return fallback;
+
+    let s = text;
+    if (s.charCodeAt(0) === 0xfeff) s = s.slice(1);
+    const lines = s.replace(/\r\n?/g, '\n').split('\n');
+    if (lines[0]?.trim() !== '---') return fallback;
+
+    let close = -1;
+    for (let i = 1; i < lines.length; i++) {
+      const t = lines[i].trim();
+      if (t === '---' || t === '...') {
+        close = i;
+        break;
+      }
+    }
+    if (close === -1) return fallback;
+
+    const data = {};
+    for (const line of lines.slice(1, close)) {
+      if (!line.trim() || line.trim().startsWith('#')) continue;
+      if (/^\s/.test(line)) continue; // indented: nesting is out of the subset
+      const colon = line.indexOf(':');
+      if (colon <= 0) continue;
+      const key = line.slice(0, colon).trim();
+      if (!KEY_RE.test(key)) continue;
+      data[key] = parseScalar(line.slice(colon + 1));
+    }
+    return { data, body: lines.slice(close + 1).join('\n') };
+  } catch {
+    return fallback;
   }
 }
