@@ -27,7 +27,13 @@ Session cookies, researched on 2026-08-16. Contains a typo: teh.
 <!-- il:normative:begin -->
 ## Requirements
 REQ-001 The user can log in with email and password.
+  Acceptance: POST /login with valid credentials returns 200 and sets a session cookie.
+
 REQ-002 A session expires after 30 minutes of inactivity.
+  Acceptance: a request made 31 minutes after the previous one returns 401.
+
+## Threat model
+Asset: session cookie. Threat: theft via XSS. Mitigation: HttpOnly + Secure.
 <!-- il:normative:end -->
 `;
 
@@ -283,4 +289,46 @@ test('approving with no SPEC is refused — there would be nothing to bind to', 
   const r = prompt('/il:approve', env);
   assert.match(JSON.parse(r.stdout).systemMessage ?? '', /spec/i);
   assert.equal(tokenFiles(env.home).length, 0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G0 has a red light. A gate that cannot refuse is decoration.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a requirement with no acceptance criterion refuses the approval', () => {
+  const env = setup({ spec: SPEC.replace(/ {2}Acceptance: a request made 31[\s\S]*?401\.\n/, '') });
+  const r = prompt('/il:approve', env);
+  const msg = JSON.parse(r.stdout).systemMessage ?? '';
+  assert.match(msg, /refused/i);
+  assert.match(msg, /REQ-002/);
+  assert.equal(tokenFiles(env.home).length, 0, 'nothing may be recorded');
+  assert.ok(denyReasonOf(writeTo('src/auth.ts', env)), 'and the gate stays shut');
+});
+
+test('a missing threat model refuses the approval — mitigations become requirements', () => {
+  const env = setup({ spec: SPEC.replace(/## Threat model[\s\S]*?(?=<!-- il:normative:end)/, '') });
+  const r = prompt('/il:approve', env);
+  assert.match(JSON.parse(r.stdout).systemMessage ?? '', /refused/i);
+  assert.equal(tokenFiles(env.home).length, 0);
+});
+
+test('heuristic findings warn but never block — a false positive must not veto a human', () => {
+  const env = setup({
+    spec: SPEC.replace('A session expires after 30 minutes of inactivity.', 'The response is fast.'),
+  });
+  const r = prompt('/il:approve', env);
+  const msg = JSON.parse(r.stdout).systemMessage ?? '';
+  assert.match(msg, /approved/i, 'a warning must not veto the human');
+  assert.match(msg, /warning/i, 'but they are told what they just accepted');
+  assert.equal(tokenFiles(env.home).length, 1);
+});
+
+test('a refused approval is auditable, so a shut gate can be explained later', () => {
+  const env = setup({ spec: SPEC.replace(/## Threat model[\s\S]*?(?=<!-- il:normative:end)/, '') });
+  prompt('/il:approve', env);
+  const log = readdirSync(join(env.home, 'projects')).map((p) =>
+    readFileSync(join(env.home, 'projects', p, 'audit.log'), 'utf8')
+  )[0];
+  assert.match(log, /approve-refused/);
+  assert.match(log, /no-threat-model/);
 });

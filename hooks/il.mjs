@@ -776,6 +776,191 @@ export function parseFrontmatter(text) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// § smells — the SPEC pre-check behind the G0 approval screen
+//
+// Grounded in ISO/IEC/IEEE 29148's requirement characteristics (verifiable,
+// singular, unambiguous) and the requirements-smells literature.
+//
+// The severity split is the design:
+//   block  structural facts a machine can be certain of. These refuse the
+//          approval — a gate with no red light is decoration (design principle 3).
+//   warn   heuristics. Shown on the approval screen and never blocking, because
+//          a regex refusing a human's approval on a false positive is exactly how
+//          a tool like this gets uninstalled.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Bare adjectives with no measurement behind them. */
+const VAGUE_WORDS = [
+  'quick', 'quickly', 'fast', 'slow', 'efficient', 'efficiently', 'performant',
+  'appropriate', 'appropriately', 'reasonable', 'reasonably', 'adequate', 'adequately',
+  'user-friendly', 'intuitive', 'easy', 'simple', 'seamless', 'smooth',
+  'robust', 'scalable', 'flexible', 'sufficient', 'sufficiently',
+  'as much as possible', 'as needed', 'if necessary', 'etc',
+  '빠르게', '빠른', '느리게', '적절히', '적절한', '적당히', '효율적', '효율적으로',
+  '사용자 친화적', '직관적', '쉬운', '간단히', '충분한', '충분히', '원활히', '원활하게',
+  '안정적으로', '유연하게', '가능한 한', '필요시', '등등',
+];
+
+const COMPARATIVES = [
+  'faster', 'slower', 'better', 'worse', 'cheaper', 'smaller', 'larger', 'higher', 'lower',
+  '더 빠른', '더 빠르게', '더 좋은', '더 낮은', '더 높은', '더 적은',
+];
+
+const PERF_HINTS = [
+  'latency', 'throughput', 'response time', 'performance', 'speed', 'memory', 'cpu',
+  '지연', '응답 시간', '처리량', '성능', '메모리',
+];
+
+function hasWord(text, word) {
+  // Korean has no word boundaries, so only the ASCII terms get \b anchoring.
+  if (/^[\x00-\x7F]+$/.test(word)) {
+    return new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}\\b`, 'i').test(text);
+  }
+  return text.includes(word);
+}
+
+function findSection(lines, headingRe) {
+  const start = lines.findIndex((l) => headingRe.test(l.trim()));
+  if (start === -1) return null;
+  const out = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^#{1,6}\s/.test(lines[i])) break;
+    out.push(lines[i]);
+  }
+  return out;
+}
+
+/** Split the normative region into REQ blocks: the id line plus its continuation. */
+function requirementBlocks(text) {
+  const lines = text.split(/\r?\n/);
+  const blocks = [];
+  let cur = null;
+  for (const line of lines) {
+    const m = /^\s*(REQ-\d+)\b\s*(?:\[[^\]]*\])?\s*(.*)$/.exec(line);
+    if (m) {
+      if (cur) blocks.push(cur);
+      cur = { id: m[1], text: m[2].trim(), rest: [] };
+    } else if (cur) {
+      if (/^#{1,6}\s/.test(line) || /^\s*(ASM|REQ)-\d+/.test(line)) {
+        blocks.push(cur);
+        cur = null;
+      } else if (line.trim()) {
+        cur.rest.push(line.trim());
+      }
+    }
+  }
+  if (cur) blocks.push(cur);
+  return blocks;
+}
+
+/**
+ * @param {string} specText
+ * @returns {Array<{req: string|null, kind: string, severity: 'block'|'warn', message: string}>}
+ */
+export function checkRequirements(specText) {
+  try {
+    const text = normativeRegion(typeof specText === 'string' ? specText : '');
+    const lines = text.split(/\r?\n/);
+    const found = [];
+
+    const blocks = requirementBlocks(text);
+    if (blocks.length === 0) {
+      found.push({
+        req: null,
+        kind: 'no-requirements',
+        severity: 'block',
+        message: 'No REQ-### items found. There is nothing for a gate to bind to.',
+      });
+    }
+
+    const threat = findSection(lines, /^#{1,6}\s*(threat model|위협\s*모델)/i);
+    if (threat === null || threat.join('').trim() === '') {
+      found.push({
+        req: null,
+        kind: 'no-threat-model',
+        severity: 'block',
+        message:
+          'No threat model. Mitigations become requirements, so this has to come before approval, not after (D-012).',
+      });
+    }
+
+    for (const b of blocks) {
+      const body = b.rest.join(' ');
+      const acceptance = /(^|\s)(acceptance|수용\s*기준)\s*[:：]/i.exec(body);
+      if (!acceptance) {
+        found.push({
+          req: b.id,
+          kind: 'missing-acceptance',
+          severity: 'block',
+          message: `${b.id} has no "Acceptance:" line. A requirement no one can test is not a requirement (29148: verifiable).`,
+        });
+      }
+
+      const all = `${b.text} ${body}`;
+
+      const vague = VAGUE_WORDS.filter((w) => hasWord(all, w));
+      if (vague.length) {
+        found.push({
+          req: b.id,
+          kind: 'unmeasurable',
+          severity: 'warn',
+          message: `${b.id} uses unmeasurable wording (${vague.slice(0, 3).join(', ')}). What number would prove it?`,
+        });
+      }
+
+      const comps = COMPARATIVES.filter((w) => hasWord(all, w));
+      if (comps.length && !/\bthan\b|보다/i.test(all)) {
+        found.push({
+          req: b.id,
+          kind: 'incomplete-comparison',
+          severity: 'warn',
+          message: `${b.id} says "${comps[0]}" without saying than what.`,
+        });
+      }
+
+      if (PERF_HINTS.some((w) => hasWord(all, w)) && !/\d/.test(all)) {
+        found.push({
+          req: b.id,
+          kind: 'unmeasurable',
+          severity: 'warn',
+          message: `${b.id} is about performance but names no number or unit.`,
+        });
+      }
+
+      // Two independent clauses in one requirement — split them so each can pass
+      // or fail on its own (29148: singular).
+      if (/;\s+\S/.test(b.text) || /\band then\b|\band also\b|그리고|및\s/i.test(b.text)) {
+        found.push({
+          req: b.id,
+          kind: 'not-singular',
+          severity: 'warn',
+          message: `${b.id} looks like two requirements in one. Split it so each can pass or fail alone.`,
+        });
+      }
+    }
+
+    // "explicitly agreed" and "declined to answer" carry different responsibility
+    // later, so the interview records which one it was.
+    const asmSection = findSection(lines, /^#{1,6}\s*(assumptions|가정)/i) ?? [];
+    for (const line of asmSection) {
+      const m = /(ASM-\d+)/.exec(line);
+      if (m && /declin|avoid|no answer|unconfirmed|회피|미확인|답변\s*없음/i.test(line)) {
+        found.push({
+          req: m[1],
+          kind: 'unconfirmed-assumption',
+          severity: 'warn',
+          message: `${m[1]} was never actually confirmed. Put it in front of the human at approval time.`,
+        });
+      }
+    }
+
+    return found;
+  } catch {
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // § env — where things live
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1427,6 +1612,41 @@ function onSessionStart(input, ctx) {
 }
 
 /**
+ * `check` is what the approval screen is built from. It runs in the hook rather
+ * than in the model, so the findings cannot be talked away by whoever wrote the
+ * spec — the same reason the verifier is a separate context.
+ */
+function onCheck(_input, ctx) {
+  if (!ctx.feature) {
+    process.stdout.write('interlocking: no active feature.\n');
+    return;
+  }
+  const spec = readTextSafe(join(ctx.projectDir, HARNESS_DIR, 'work', ctx.feature, 'SPEC.md'));
+  if (spec === null) {
+    process.stdout.write(`SPEC.md not found at ${HARNESS_DIR}/work/${ctx.feature}/SPEC.md\n`);
+    return;
+  }
+
+  const findings = checkRequirements(spec);
+  const blockers = findings.filter((f) => f.severity === 'block');
+  const warnings = findings.filter((f) => f.severity === 'warn');
+  const out = [];
+
+  if (blockers.length) {
+    out.push(`BLOCKING (${blockers.length}) — /il:approve will be refused until these are fixed:`);
+    for (const f of blockers) out.push(`  ✗ ${f.message}`);
+  }
+  if (warnings.length) {
+    out.push(`${blockers.length ? '\n' : ''}REVIEW (${warnings.length}) — these do not block, but read them before approving:`);
+    for (const f of warnings) out.push(`  ⚠ ${f.message}`);
+  }
+  if (!findings.length) out.push('No blocking issues and nothing flagged for review.');
+
+  out.push(`\nspec hash: ${specHash(spec).slice(0, 8)}  ·  ${HARNESS_DIR}/work/${ctx.feature}/SPEC.md`);
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+/**
  * `status` is a CLI mode, not a hook event: `/il:status` injects its output with
  * a `!` block. Keeping the reporting here means the command file cannot drift
  * from what the hook actually enforces.
@@ -1624,6 +1844,29 @@ function handleApprove(directive, ctx, pid, feature, session) {
     return;
   }
 
+  // G0's red light. Blockers are structural facts, never heuristics — a gate that
+  // cannot refuse is decoration, but one that refuses on a regex gets uninstalled.
+  const findings = checkRequirements(spec);
+  const blockers = findings.filter((f) => f.severity === 'block');
+  if (blockers.length) {
+    const list = blockers.map((f) => `     · ${f.message}`).join('\n');
+    tellBoth(
+      `[il] G0 refused for ${feature} — ${blockers.length} blocking issue(s):\n${list}\n` +
+        `     Fix these in SPEC.md, then approve again.`,
+      `[il] The approval was REFUSED. SPEC.md has ${blockers.length} blocking issue(s):\n${blockers
+        .map((f) => `- ${f.message}`)
+        .join('\n')}\nFix them in SPEC.md. Do not claim the gate is open.`
+    );
+    audit(ctx.home, pid, {
+      at: new Date().toISOString(),
+      event: 'approve-refused',
+      feature,
+      blockers: blockers.map((f) => f.kind),
+      session,
+    });
+    return;
+  }
+
   const policy = loadPolicy(ctx.projectDir);
   const hash = specHash(spec);
   const token = {
@@ -1657,8 +1900,14 @@ function handleApprove(directive, ctx, pid, feature, session) {
     return;
   }
 
+  const warned = findings.filter((f) => f.severity === 'warn');
+  const warnNote = warned.length
+    ? `\n     Approved with ${warned.length} open warning(s):\n` +
+      warned.map((f) => `     · ${f.message}`).join('\n')
+    : '';
+
   tellBoth(
-    `[il] ${directive.gate} approved — ${feature} (spec ${hash.slice(0, 8)}). Code edits unlocked.`,
+    `[il] ${directive.gate} approved — ${feature} (spec ${hash.slice(0, 8)}). Code edits unlocked.${warnNote}`,
     `[il] ${directive.gate} approved for ${feature}, spec ${hash.slice(0, 8)}. Code edits are unlocked.\n` +
       `Update ${HARNESS_DIR}/work/${feature}/STATE.md: set gates_passed to include ${directive.gate}, ` +
       `set spec_sha256 to ${hash.slice(0, 8)}, and append one history line.\n` +
@@ -1725,19 +1974,38 @@ const DISPATCH = {
   'pre-bash': onPreBash,
   'pre-mcp': onPreMcp,
   status: onStatus,
+  check: onCheck,
 };
 
 /** Modes invoked from a command file rather than by a hook event. */
-const CLI_MODES = new Set(['status']);
+const CLI_MODES = new Set(['status', 'check']);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // § main
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function readStdin() {
-  const chunks = [];
-  for await (const c of process.stdin) chunks.push(c);
-  return Buffer.concat(chunks).toString('utf8');
+/**
+ * Hook events always write a payload and close the pipe. Everything else might
+ * not, so this can never be an unbounded wait: a hook that hangs holds up the
+ * tool call behind it until Claude Code's own timeout fires, which the user sees
+ * as the session locking up.
+ */
+function readStdin(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    timer.unref?.();
+    process.stdin.on('data', (c) => chunks.push(c));
+    process.stdin.on('end', finish);
+    process.stdin.on('error', finish);
+  });
 }
 
 function logCrash(home, err) {
@@ -1758,12 +2026,16 @@ export async function main(argv = process.argv, env = process.env) {
     const handler = Object.prototype.hasOwnProperty.call(DISPATCH, mode) ? DISPATCH[mode] : null;
     if (!handler) return 0;
 
+    // CLI modes are launched from a command file's ! block with nothing piped in,
+    // so reading stdin there would block until the timeout for no benefit.
     let input = {};
-    try {
-      const parsed = JSON.parse(await readStdin());
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) input = parsed;
-    } catch {
-      /* malformed payload — every field is optional anyway */
+    if (!CLI_MODES.has(mode)) {
+      try {
+        const parsed = JSON.parse(await readStdin());
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) input = parsed;
+      } catch {
+        /* malformed payload — every field is optional anyway */
+      }
     }
 
     const projectDir = env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
