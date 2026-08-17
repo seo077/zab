@@ -1269,14 +1269,25 @@ function decideWrites(targets, denyTags, input, ctx) {
     return;
   }
 
-  const gated = targets.filter((t) => classify(t, classifyCtx) === 'code');
+  // A path is gated if EITHER the live policy or the blessed baseline says so, so
+  // that widening policy.json cannot unlock anything on its own. See policyBaseline().
+  const pid = projectId(ctx.projectDir);
+  const baseline = policyBaseline(ctx.home, pid, policy);
+  const baselineCtx = { projectDir: ctx.projectDir, policy: baseline };
+  const gated = targets.filter(
+    (t) => classify(t, classifyCtx) === 'code' || classify(t, baselineCtx) === 'code'
+  );
   if (!gated.length && !denyTags.length) return;
 
   const gate = gateState(ctx);
   if (gate.open) {
     if (gate.lease) {
+      consumeLease(ctx.home, pid, gate.feature, gate.lease);
+      const used = Number(gate.lease.edits_used ?? 0) + 1;
+      const left = Math.max(0, Number(gate.lease.max_edits ?? 0) - used);
       noteTool(
-        `[il] override lease in force (reason: ${String(gate.lease.reason ?? '').slice(0, 80)}). ` +
+        `[il] override lease in force — ${left} edit(s) left. ` +
+          `reason: ${String(gate.lease.reason ?? '').slice(0, 80)}. ` +
           `Record this write in ${HARNESS_DIR}/work/${gate.feature}/STATE.md history.`
       );
     } else if (gate.degraded) {
@@ -1292,7 +1303,7 @@ function decideWrites(targets, denyTags, input, ctx) {
     ? `a command that cannot be checked statically (${denyTags.join(', ')})`
     : gated[0];
 
-  audit(ctx.home, projectId(ctx.projectDir), {
+  audit(ctx.home, pid, {
     at: new Date().toISOString(),
     event: 'deny',
     feature: gate.feature,
@@ -1460,8 +1471,251 @@ function onStatus(_input, ctx) {
   process.stdout.write(lines.join('\n') + '\n');
 }
 
-function onPrompt() {
-  // Approval and override recording land in the next step.
+// ─────────────────────────────────────────────────────────────────────────────
+// § directives — the only path that can open a gate
+//
+// A gate is opened by a UserPromptSubmit event carrying the human's literal
+// keystrokes. The model cannot produce that event: it writes its own replies, it
+// does not type into the user's input box. That single asymmetry is what makes
+// the gate real, and it is why nothing here is ever driven by model output.
+//
+// Two forms are accepted on purpose. `/il:approve` needs `commands/approve.md` to
+// exist, because an UNREGISTERED slash command short-circuits before hooks run
+// (measured — see docs/design/platform-facts.md). The slash-free `il approve`
+// cannot be short-circuited, so it keeps working whatever the command layer does.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DIRECTIVE_RE = /^\s*\/?il[:\s]+(approve|override|policy)\b\s*([\s\S]*)$/i;
+
+/**
+ * @returns {{kind:'approve', gate:string}|{kind:'override', reason:string}|{kind:'policy'}|null}
+ *   The directive must OPEN the prompt. "what does /il:approve do?" is a question,
+ *   not an approval, and must never be treated as one.
+ */
+export function parseIlDirective(text) {
+  try {
+    if (typeof text !== 'string') return null;
+    const m = DIRECTIVE_RE.exec(text);
+    if (!m) return null;
+    const kind = m[1].toLowerCase();
+    const rest = (m[2] ?? '').trim();
+    if (kind === 'approve') {
+      const first = (rest.split(/\s+/)[0] || '').toUpperCase();
+      return { kind, gate: /^G\d+$/.test(first) ? first : 'G0' };
+    }
+    if (kind === 'override') return { kind, reason: rest };
+    return { kind };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `systemMessage` reaches the human's terminal only; `additionalContext` reaches
+ * the model. Verified in docs/design/platform-facts.md.
+ */
+function tellBoth(human, model) {
+  const payload = { systemMessage: human };
+  if (model) {
+    payload.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: model };
+  }
+  emit(payload);
+}
+
+function baselinePath(home, pid) {
+  return join(storeDir(home, pid), 'policy-baseline.json');
+}
+
+/**
+ * `policy.json` lives under `.interlocking/`, which is always writable — otherwise
+ * the harness could not manage its own files. That makes the policy itself a way
+ * to unlock the gate: set `always_allow: ["**"]` and nothing is gated any more.
+ *
+ * The defence is a baseline snapshot: a path is gated if EITHER the current policy
+ * or the blessed baseline says so, meaning a policy may narrow freely but never
+ * widen on its own. The baseline is re-blessed by `/il:approve` or `/il:policy`,
+ * both of which require the human's keystrokes.
+ *
+ * Documented limit: the first policy il ever sees becomes the baseline. If it was
+ * already widened before the plugin was installed, that is what gets recorded.
+ */
+function policyBaseline(home, pid, current) {
+  const existing = readJsonSafe(baselinePath(home, pid));
+  if (existing) return existing;
+  blessPolicy(home, pid, current);
+  return current;
+}
+
+function blessPolicy(home, pid, policy) {
+  if (!ensureDir(storeDir(home, pid))) return false;
+  try {
+    writeFileSync(baselinePath(home, pid), JSON.stringify(policy, null, 2), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function writeSigned(home, pid, relPath, token) {
+  const key = loadKey(home);
+  if (!key) return false;
+  const full = join(storeDir(home, pid), relPath);
+  if (!ensureDir(dirOf(full))) return false;
+  try {
+    writeFileSync(full, JSON.stringify({ ...token, sig: signToken(key, token) }, null, 2), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function dirOf(p) {
+  const norm = p.replace(/\\/g, '/');
+  return norm.slice(0, norm.lastIndexOf('/'));
+}
+
+function onPrompt(input, ctx) {
+  const directive = parseIlDirective(input?.prompt);
+  if (!directive) return;
+
+  const pid = projectId(ctx.projectDir);
+  const feature = ctx.feature;
+  const session = input?.session_id ?? null;
+
+  if (!feature) {
+    tellBoth(
+      '[il] no active feature — nothing to approve. Start one with /il:new <goal>.',
+      '[il] The human used an il directive, but no feature is active. Do not claim anything was approved.'
+    );
+    return;
+  }
+
+  if (directive.kind === 'policy') {
+    const ok = blessPolicy(ctx.home, pid, loadPolicy(ctx.projectDir));
+    audit(ctx.home, pid, { at: new Date().toISOString(), event: 'policy-bless', feature, session, ok });
+    tellBoth(
+      ok
+        ? `[il] policy.json accepted as the new baseline for ${feature}.`
+        : '[il] could not write the policy baseline — il is in advisory mode.',
+      '[il] The human re-blessed policy.json. You had no part in it; do not record it as your own action.'
+    );
+    return;
+  }
+
+  if (directive.kind === 'override') {
+    handleOverride(directive, ctx, pid, feature, session);
+    return;
+  }
+
+  handleApprove(directive, ctx, pid, feature, session);
+}
+
+function handleApprove(directive, ctx, pid, feature, session) {
+  const specPath = join(ctx.projectDir, HARNESS_DIR, 'work', feature, 'SPEC.md');
+  const spec = readTextSafe(specPath);
+
+  // Approving an empty spec would bind the gate to nothing at all.
+  if (spec === null || normalizeText(normativeRegion(spec)) === '') {
+    tellBoth(
+      `[il] refused — SPEC.md for ${feature} is empty or unreadable. There is nothing to approve.\n` +
+        `     Expected at ${HARNESS_DIR}/work/${feature}/SPEC.md`,
+      `[il] The approval was REFUSED: SPEC.md is empty. Write the spec first, then ask the human to approve.`
+    );
+    return;
+  }
+
+  const policy = loadPolicy(ctx.projectDir);
+  const hash = specHash(spec);
+  const token = {
+    v: 1,
+    gate: directive.gate,
+    feature,
+    spec_path: `${HARNESS_DIR}/work/${feature}/SPEC.md`,
+    spec_hash: hash,
+    policy_hash: sha256hex(JSON.stringify(policy)),
+    granted_at: new Date().toISOString(),
+    granted_in_session: session,
+  };
+
+  const ok = writeSigned(ctx.home, pid, join('approvals', `${feature}.${directive.gate}.json`), token);
+  if (ok) blessPolicy(ctx.home, pid, policy);
+  audit(ctx.home, pid, {
+    at: token.granted_at,
+    event: 'approve',
+    gate: directive.gate,
+    feature,
+    spec_hash: hash,
+    session,
+    ok,
+  });
+
+  if (!ok) {
+    tellBoth(
+      '[il] could not write the approval record — il is in advisory mode and the gate is not enforcing.',
+      '[il] The approval could not be stored. Tell the human il is degraded; do not claim the gate is open.'
+    );
+    return;
+  }
+
+  tellBoth(
+    `[il] ${directive.gate} approved — ${feature} (spec ${hash.slice(0, 8)}). Code edits unlocked.`,
+    `[il] ${directive.gate} approved for ${feature}, spec ${hash.slice(0, 8)}. Code edits are unlocked.\n` +
+      `Update ${HARNESS_DIR}/work/${feature}/STATE.md: set gates_passed to include ${directive.gate}, ` +
+      `set spec_sha256 to ${hash.slice(0, 8)}, and append one history line.\n` +
+      `Editing the normative region of SPEC.md will invalidate this approval.`
+  );
+}
+
+const OVERRIDE_DEFAULTS = { max_minutes: 20, max_edits: 25 };
+
+function handleOverride(directive, ctx, pid, feature, session) {
+  const reason = String(directive.reason ?? '').trim();
+  if (!reason) {
+    tellBoth(
+      '[il] override refused — give a reason:  /il:override <why>\n' +
+        '     An unexplained bypass is worth nothing when you read the history later.',
+      '[il] The override was REFUSED for having no reason. The gate is unchanged.'
+    );
+    return;
+  }
+
+  const cfg = { ...OVERRIDE_DEFAULTS, ...(loadPolicy(ctx.projectDir).override ?? {}) };
+  const minutes = Number(cfg.max_minutes) || OVERRIDE_DEFAULTS.max_minutes;
+  const maxEdits = Number(cfg.max_edits) || OVERRIDE_DEFAULTS.max_edits;
+
+  const lease = {
+    v: 1,
+    kind: 'override',
+    feature,
+    reason: reason.slice(0, 300),
+    granted_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + minutes * 60_000).toISOString(),
+    max_edits: maxEdits,
+    edits_used: 0,
+    session,
+  };
+
+  const ok = writeSigned(ctx.home, pid, join('leases', `${feature}.json`), lease);
+  audit(ctx.home, pid, { at: lease.granted_at, event: 'override', feature, reason: lease.reason, session, ok });
+
+  tellBoth(
+    ok
+      ? `[il] override granted — ${minutes} min / ${maxEdits} edits.\n     reason: ${lease.reason}\n     Recorded in the audit log and shown at every session start until VERIFY covers it.`
+      : '[il] could not write the override lease — il is in advisory mode.',
+    ok
+      ? `[il] The human granted an override for ${feature} (reason: ${lease.reason}). ` +
+          `Append one history line to STATE.md recording it. Do not treat this as G0 approval — the spec is still unapproved.`
+      : '[il] The override could not be stored. Tell the human il is degraded.'
+  );
+}
+
+/** Spend one edit from an active lease. Consumed by use, not only by time. */
+function consumeLease(home, pid, feature, lease) {
+  const key = loadKey(home);
+  if (!key) return;
+  const next = { ...lease, edits_used: Number(lease.edits_used ?? 0) + 1 };
+  delete next.sig;
+  writeSigned(home, pid, join('leases', `${feature}.json`), next);
 }
 
 const DISPATCH = {
