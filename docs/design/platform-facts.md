@@ -267,3 +267,147 @@ directory, so the instruction is possible and still bounded.
 
 **The pattern in all three:** unit tests check what a function returns. These are
 failures of *integration with the platform*, and every one of them is quiet.
+
+---
+
+# Codex CLI
+
+> Measured on **Codex CLI 0.149.0**, Windows 11, Node v24.14.0.
+> Method: a probe plugin installed from a local marketplace, driven by real
+> `codex exec` runs; payloads captured from the hook's stdin. The wire schemas
+> below were cross-checked against the JSON Schema embedded in `codex.exe`.
+
+The short version: **the hook contract is the same one Claude Code uses**, field
+for field, so the enforcement layer ports without a translation shim. Three
+things differ, and one of them is the kind of difference that fails silently.
+
+## Summary
+
+| # | Question | Answer | Design impact |
+|---|---|---|---|
+| C1 | Same hook events? | **Yes**, plus `PermissionRequest`, `PostCompact`, `SubagentStart/Stop`. | `SessionStart`, `UserPromptSubmit`, `PreToolUse` all exist. |
+| C2 | Same input/output JSON? | **Yes** — `hook_event_name`, `tool_input`, `hookSpecificOutput.permissionDecision`. | `emit()`, `denyTool()`, `tellBoth()` unchanged. |
+| C3 | Does `PreToolUse` deny actually block? | **Yes**, and the reason reaches the model verbatim. | G0 hard block is real here too. |
+| C4 | Does `UserPromptSubmit` carry the literal prompt? | **Yes.** | Human-only approval survives. |
+| C5 | Which write tool? | **`apply_patch`** — no Edit/Write/MultiEdit. | Needed `parseApplyPatch()`. See C7. |
+| C6 | Which shell runs hooks on Windows? | **PowerShell, not Git Bash.** | POSIX hook commands fail open. See C8. |
+| C7 | Is `agent_type` attested? | **No.** Not sent, and `spawn_agent` takes it as a model argument. | Owned-artifact rule degrades to a convention. |
+| C8 | Do plugin hooks load at all? | **Yes**, from `hooks/hooks.json`, but only once **trusted**. | Untrusted = silently skipped. |
+
+---
+
+## C2 — the wire format is Claude Code's
+
+Verbatim `PreToolUse` payload from a real run:
+
+```json
+{ "session_id": "01a029a0-…", "turn_id": "01a029a0-…",
+  "transcript_path": "C:\Users\me\.codex\sessions\2026\08\22\rollout-….jsonl",
+  "cwd": "C:\…\project", "hook_event_name": "PreToolUse",
+  "model": "gpt-5.6-sol", "permission_mode": "bypassPermissions",
+  "tool_name": "Bash", "tool_input": { "command": "echo hi" },
+  "tool_use_id": "exec-096bd982-…" }
+```
+
+`Bash` is spelled `Bash`, and its input is `{command}` — identical. Deny works:
+
+```
+ERROR codex_core::tools::router: error=Command blocked by PreToolUse hook: <reason>
+hook: PreToolUse Blocked
+```
+
+Two output fields Claude Code accepts are **rejected** here, and rejection fails
+closed on the hook rather than on the tool: `permissionDecision: "allow"` and
+`"ask"` both produce `PreToolUse hook returned unsupported permissionDecision`.
+Only `deny` is honoured. This costs nothing — `il` never emits either, for its
+own reasons (see `§ out`).
+
+## C5 — `apply_patch` is the only write tool
+
+There is no path field anywhere. The whole patch arrives as a string:
+
+```json
+{ "tool_name": "apply_patch",
+  "tool_input": { "command": "*** Begin Patch\n*** Add File: hello.txt\n+hi\n*** End Patch" } }
+```
+
+So on Codex the G0 gate is exactly as good as the envelope parser is. Verbs are
+`*** Add File:`, `*** Update File:`, `*** Delete File:` and `*** Move to:`, and a
+header must begin its line — body lines always carry a `+`, `-` or space prefix,
+which is what stops `+*** Add File: decoy.ts` from being read as a header.
+
+## C6 — PowerShell, and the failure is silent
+
+The hook command form that Claude Code needs is the form that disables the gate
+here. This exact command, on Windows:
+
+```
+command -v node >/dev/null 2>&1 && node "${CLAUDE_PLUGIN_ROOT}/…/il.mjs" pre-bash || true
+```
+
+produced `hook: PreToolUse Failed` — **and the tool call then ran normally.**
+Codex fails open on a hook that will not start, so a gate configured this way is
+not a weakened gate, it is no gate, and nothing says so except one line of
+scrollback.
+
+The fix is `commandWindows`, a per-handler alternative Codex prefers on Windows:
+
+```json
+{ "type": "command",
+  "command":        "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" pre-bash || true",
+  "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" pre-bash }" }
+```
+
+Measured: the PowerShell form runs and blocks. Claude Code ignores the extra key
+and `claude plugin validate --strict` passes with it present, so one `hooks.json`
+serves both hosts. `test/hooks-config.test.mjs` is what keeps it that way.
+
+## C7 — there is no attested agent identity
+
+`agent_type` is in the `PreToolUse` schema but Codex does not populate it, and
+`spawn_agent` documents its own `agent_type` as *"Agent type override for the new
+agent"* — a model-supplied argument. On Claude Code the harness attests it, which
+is the entire reason `only il-verifier may write VERIFY.md` means anything.
+
+There is no way to recover identity attestation here, and current `spawn_agent`
+also has no per-agent environment parameter. Building a fixed packet therefore
+arms one signed, 10-minute, single-use write to its judgement file. `/il:doctor`
+calls this a capability convention, not identity proof. The G0 gate, which is the
+load-bearing claim, does not depend on this.
+
+## C8 — plugin hooks exist, but need trusting once
+
+Plugins are discovered from `.codex-plugin/plugin.json`; `hooks/hooks.json` is
+picked up by default component discovery. Do **not** add a `hooks` field to the
+manifest — the installer's validation rejects it.
+
+Codex sets `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PLUGIN_DATA` for plugin hooks (under
+`~/.codex/plugins/`), and substitutes `${CLAUDE_PLUGIN_ROOT}` in both `command`
+and `commandWindows`. That is why host detection reads the *paths* and not the
+variable names.
+
+The trust step is the trap. A freshly installed plugin's hooks are **not trusted**,
+and an untrusted hook is skipped without a word:
+
+```
+$ codex exec "…"                                  # hook never ran, tool proceeded
+$ codex exec --dangerously-bypass-hook-trust "…"  # hook ran, tool blocked
+```
+
+Accept the prompt once in the TUI (`/hooks`) and it is recorded as a
+`trusted_hash` in `config.toml`. Until then the gate is off. This is the first
+thing `/il:doctor` should be run to rule out.
+
+## Not measured on Codex
+
+- **MCP tool names.** The `pre-mcp` handler matches `^mcp__.*`, which is Claude
+  Code's naming. Codex has a `non_prefixed_mcp_tool_names` feature flag, so it
+  clearly prefixes them by default — but with what was never checked, so assume
+  the MCP row of the README's table does not apply on Codex until someone
+  measures it. Everything else in the gate is tool-name-exact and verified.
+- **macOS and Linux.** Every measurement above is Windows, where `commandWindows`
+  is the branch that fires. The POSIX `command` branch has never been driven under
+  Codex on any platform.
+- **The TUI trust prompt.** Confirmed only by its absence: hooks did not run until
+  `--dangerously-bypass-hook-trust` was passed. The `trusted_hash` in `config.toml`
+  is read from the binary's config schema, not from a run that produced one.

@@ -21,11 +21,21 @@ Use the `il-spec` skill and follow it. In outline:
    intended, and it is why the spec comes first.
 3. Size it. Trivial work does not belong here: tell the human to use
    `/il:override <reason>` instead. An epic gets decomposed before anything else.
-4. Research, interview, threat model, `SPEC.md`, `STATE.md`.
-5. Run the checker, present a ~20-line approval screen, and stop.
+4. Research, interview, threat model, `SPEC.md`, `STATE.md`. Write each interview
+   answer down as a `DEC-###` as you get it. **Do not write acceptance criteria** —
+   they are not yours to write.
+5. Build the criteria packet (`il.mjs criteria-packet`) and hand it to `il-criteria`,
+   which writes `CRITERIA.md`. You cannot write that file; a hook refuses it.
+6. Show the design brief (`il.mjs brief`) whole — that is the screen they judge by,
+   and it pairs each REQ with the criterion a different agent set for it.
+7. Build the review packet (`il.mjs review-packet`) and hand it to `il-spec-critic`,
+   which reads both documents cold and writes `REVIEW.md`. A `NOT YET` there
+   refuses the approval until a human overrules it.
+8. Run the checker, present a ~20-line approval screen, and stop.
 
 Do not write source code, and do not approve anything. Only a human's keystrokes
-can open the gate; nothing you write can.
+can open the gate; nothing you write can. You write `SPEC.md`; the criteria and
+the verdict on them belong to agents you cannot speak for.
 
 If a feature is already active, say so and ask whether to finish it, archive it, or
 start alongside it — do not silently overwrite `.interlocking/current`.

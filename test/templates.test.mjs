@@ -1,6 +1,7 @@
-// The shipped templates and the hook's parsers are coupled: SPEC.md's markers,
-// its "Acceptance:" convention and its section headings are all things
-// checkRequirements() looks for, and STATE.md's frontmatter is a subset
+// The shipped templates and the hook's parsers are coupled: SPEC.md's markers
+// and section headings are what checkRequirements() looks for, CRITERIA.md's
+// "Judged:" convention is what parseCriteria() reads, REVIEW.md's "VERDICT:" line
+// is what Gate 1 rules on, and STATE.md's frontmatter is a subset
 // parseFrontmatter() can read.
 //
 // Nothing enforces that coupling at runtime, so a change to either side would
@@ -12,7 +13,17 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkRequirements, parseFrontmatter, normativeRegion, normalizeText, DEFAULT_POLICY } from '../hooks/il.mjs';
+import {
+  checkRequirements,
+  checkCriteria,
+  parseCriteria,
+  parseReview,
+  parseFrontmatter,
+  normativeRegion,
+  normalizeText,
+  composeDesignBrief,
+  DEFAULT_POLICY,
+} from '../hooks/il.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tpl = (name) => readFileSync(join(ROOT, 'templates', name), 'utf8');
@@ -34,25 +45,101 @@ test('SPEC.md puts requirements, threats and assumptions INSIDE the binding regi
   assert.doesNotMatch(region, /## Research/);
 });
 
+test('SPEC.md keeps Decisions OUTSIDE the binding region', () => {
+  // Writing down why something was chosen must never cost a re-approval, or it
+  // stops being written down.
+  const s = tpl('SPEC.md');
+  assert.match(s, /## Decisions/);
+  assert.match(s, /DEC-001/, 'the id form composeDesignBrief parses');
+  assert.doesNotMatch(normativeRegion(s), /## Decisions/);
+});
+
+test('the design brief reads the template back without showing its instructions', () => {
+  // The template is mostly HTML comments telling the author what to write. If
+  // those reached the approval screen, the human would be reading boilerplate
+  // instead of the design — and every heading would look filled in.
+  const brief = composeDesignBrief({ feature: '001-x', spec: tpl('SPEC.md') });
+  assert.ok(brief.includes('DESIGN BRIEF'));
+  assert.ok(!brief.includes('<!--'), 'a comment leaked into the brief');
+  assert.ok(!brief.includes('il:normative'), 'the region markers are not content');
+  assert.ok(!brief.includes('the id form'), 'no instructional prose from the template');
+  assert.ok(!brief.includes('Cite sources'), 'no instructional prose from the template');
+});
+
+test('the labels the brief looks for are the labels the template teaches', () => {
+  // The coupling that has bitten this project before: two sides of a parser
+  // agreeing with their own tests and disagreeing with each other.
+  const filled = tpl('SPEC.md')
+    .replace('DEC-001 <what was settled, in one line>', 'DEC-001 Coordinates come from the PDF.')
+    .replace('  Asked: <the question you put to them>', '  Asked: Where do coordinates come from?')
+    .replace('  Answer: <what they said>', '  Answer: Always the PDF.')
+    .replace('  Lands in: REQ-###, REQ-###', '  Lands in: REQ-001')
+    .replace(
+      'ASM-001 <the assumption> (user: explicitly agreed | declined to answer)',
+      'ASM-001 One region only. (user: declined to answer)'
+    )
+    .replace('  Affects: REQ-###', '  Affects: REQ-001');
+  const brief = composeDesignBrief({ feature: '001-x', spec: filled });
+  assert.match(brief, /asked\s+Where do coordinates come from\?/, 'Asked: is parsed');
+  assert.match(brief, /you\s+Always the PDF\./, 'Answer: is parsed');
+  assert.match(brief, /lands\s+REQ-001/, 'Lands in: is parsed');
+  assert.match(brief, /affects REQ-001/, 'Affects: is parsed');
+  assert.ok(brief.includes('⚠ ASM-001'), '"declined to answer" must read as unconfirmed');
+});
+
 test('SPEC.md teaches the exact conventions the checker requires', () => {
   const s = tpl('SPEC.md');
   assert.match(s, /REQ-001/, 'REQ id form');
-  assert.match(s, /Acceptance:/, 'the acceptance keyword checkRequirements looks for');
   assert.match(s, /ASM-001/, 'assumption id form');
   assert.match(s, /declined to answer/, 'the avoided-answer wording the checker flags');
 });
 
-test('a spec written from the template passes its own gate', () => {
-  // The end-to-end coupling: fill the placeholders the way the template tells you
-  // to, and G0 must accept it. If this fails, the harness rejects its own output.
-  const filled = tpl('SPEC.md')
+test('SPEC.md no longer teaches the author to write their own criterion', () => {
+  // The single change this whole separation rests on. A template that still shows
+  // an "Acceptance:" line teaches the habit back into existence, and the spec
+  // author is once again choosing the yardstick they will be measured against.
+  const region = normativeRegion(tpl('SPEC.md'));
+  const uncommented = region.replace(/<!--[\s\S]*?-->/g, '');
+  assert.doesNotMatch(uncommented, /Acceptance\s*:/i);
+});
+
+test('CRITERIA.md carries the markers the approval hash binds to', () => {
+  const c = tpl('CRITERIA.md');
+  assert.match(c, /<!--\s*il:normative:begin\s*-->/);
+  assert.match(c, /<!--\s*il:normative:end\s*-->/);
+  assert.notEqual(normativeRegion(c), c, 'the markers must actually delimit something');
+});
+
+test('CRITERIA.md teaches the labels parseCriteria reads', () => {
+  // The coupling that has bitten this project before: two sides of a parser
+  // agreeing with their own tests and disagreeing with each other.
+  const filled = tpl('CRITERIA.md')
+    .replace('  Judged: <what would prove it, with numbers and units>', '  Judged: a request 31 minutes later returns 401.')
+    .replace('  Method: <the command to run, or the file:line to point at>', '  Method: run `npm test -- expiry`');
+  const parsed = parseCriteria(filled);
+  assert.ok(parsed.has('REQ-001'), 'the REQ id form the parser keys on');
+  assert.equal(parsed.get('REQ-001').judged, 'a request 31 minutes later returns 401.');
+  assert.equal(parsed.get('REQ-001').method, 'run `npm test -- expiry`');
+});
+
+test('REVIEW.md teaches the two lines Gate 1 actually reads', () => {
+  const r = parseReview(tpl('REVIEW.md'));
+  assert.equal(r.verdict, 'NOT YET', 'the VERDICT line must be on its own line to be read');
+  assert.ok(r.blockers.length > 0, 'the blockers section is where NOT YET is justified');
+  // The template's hashes are placeholders, so they must NOT parse as real ones —
+  // a template that accidentally bound to something would clear a gate it never read.
+  assert.equal(r.specHash, null);
+  assert.equal(r.criteriaHash, null);
+});
+
+test('a spec and criteria written from the templates pass their own gate', () => {
+  // The end-to-end coupling: fill the placeholders the way the templates tell you
+  // to, and G0 must accept the pair. If this fails, the harness rejects its own
+  // output — and now there are two documents that have to agree, so the failure
+  // mode is one template drifting from the other.
+  const spec = tpl('SPEC.md')
     .replace('REQ-001 <what the system does, in one sentence>', 'REQ-001 The user can log in with email and password.')
-    .replace(
-      '  Acceptance: <the command to run, or the observable fact, with numbers and units>',
-      '  Acceptance: POST /login with valid credentials returns 200; run `npm test -- login`.'
-    )
     .replace('REQ-002 <...>', 'REQ-002 A session expires after 30 minutes of inactivity.')
-    .replace('  Acceptance: <...>', '  Acceptance: a request 31 minutes later returns 401.')
     .replace(
       '| <what an attacker wants> | <how they get it> | <what stops them> | REQ-### |',
       '| session cookie | XSS theft | HttpOnly + Secure | REQ-003 |'
@@ -62,8 +149,31 @@ test('a spec written from the template passes its own gate', () => {
       'ASM-001 Single-region deployment. (user: explicitly agreed)'
     );
 
-  const blockers = checkRequirements(filled).filter((f) => f.severity === 'block');
-  assert.deepEqual(blockers, [], `the template must not produce a spec its own gate refuses: ${JSON.stringify(blockers, null, 2)}`);
+  const criteria = tpl('CRITERIA.md')
+    .replace(
+      '  Judged: <what would prove it, with numbers and units>',
+      '  Judged: POST /login with valid credentials returns 200 and sets a session cookie.'
+    )
+    .replace('  Method: <the command to run, or the file:line to point at>', '  Method: run `npm test -- login`')
+    .replace('  Judged: <...>', '  Judged: a request 31 minutes after the previous one returns 401.')
+    .replace('  Method: <...>', '  Method: run `npm test -- expiry`');
+
+  const blockers = [...checkRequirements(spec), ...checkCriteria(spec, criteria)].filter(
+    (f) => f.severity === 'block'
+  );
+  assert.deepEqual(
+    blockers,
+    [],
+    `the templates must not produce a pair their own gate refuses: ${JSON.stringify(blockers, null, 2)}`
+  );
+});
+
+test('the two templates agree on which REQ ids exist', () => {
+  // An orphan criterion or an uncriterioned REQ in the shipped templates would
+  // ship a harness that blocks the first spec written from it.
+  const specIds = [...normativeRegion(tpl('SPEC.md')).matchAll(/^REQ-\d+/gm)].map((m) => m[0]);
+  const criteriaIds = [...parseCriteria(tpl('CRITERIA.md')).keys()];
+  assert.deepEqual(criteriaIds.sort(), specIds.sort());
 });
 
 test('STATE.md frontmatter is readable by the parser that has to read it', () => {
@@ -109,6 +219,40 @@ test('every template is normalization-stable, so a checkout cannot shift a hash'
 test('the agent named in policy.json actually ships', () => {
   const names = readdirSync(join(ROOT, 'agents')).map((f) => f.replace(/\.md$/, ''));
   assert.ok(names.includes('il-verifier'), `agents/ has ${names.join(', ')}`);
+});
+
+test('every agent the hook has a write rule for actually ships', () => {
+  // A rule keyed on an agent_type nobody can spawn silently protects nothing.
+  const names = readdirSync(join(ROOT, 'agents')).map((f) => f.replace(/\.md$/, ''));
+  const hook = readFileSync(join(ROOT, 'hooks', 'il.mjs'), 'utf8');
+  for (const m of hook.matchAll(/^const (?:VERIFIER|CRITIC)_AGENT = '([^']+)';$/gm)) {
+    assert.ok(names.includes(m[1]), `il.mjs has a write rule for ${m[1]}, which agents/ does not ship`);
+  }
+});
+
+test('every agent a skill tells you to launch actually ships', () => {
+  const names = readdirSync(join(ROOT, 'agents')).map((f) => f.replace(/\.md$/, ''));
+  for (const dir of readdirSync(join(ROOT, 'skills'))) {
+    const text = readFileSync(join(ROOT, 'skills', dir, 'SKILL.md'), 'utf8');
+    for (const m of text.matchAll(/`(il-[a-z-]+)`\s+subagent/g)) {
+      assert.ok(names.includes(m[1]), `skills/${dir} launches ${m[1]}, which agents/ does not ship`);
+    }
+  }
+});
+
+test('every CLI mode a command file invokes is a mode the hook dispatches', () => {
+  // A `!` block that runs an unknown mode produces nothing at all — no output,
+  // no error, no turn. The command just silently does less than it says.
+  const hook = readFileSync(join(ROOT, 'hooks', 'il.mjs'), 'utf8');
+  const declared = /const CLI_MODES = new Set\(\[([^\]]+)\]\)/.exec(hook);
+  assert.ok(declared, 'CLI_MODES must stay greppable');
+  const modes = new Set([...declared[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+  for (const name of readdirSync(join(ROOT, 'commands'))) {
+    const text = readFileSync(join(ROOT, 'commands', name), 'utf8');
+    for (const m of text.matchAll(/il\.mjs"\s+([a-z-]+)/g)) {
+      assert.ok(modes.has(m[1]), `commands/${name} runs "il.mjs ${m[1]}", which is not a CLI mode`);
+    }
+  }
 });
 
 test('a command that runs a ! block declares permission to run it', () => {

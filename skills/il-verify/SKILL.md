@@ -22,11 +22,19 @@ Do not write it yourself. Run:
 
 The range runs from `last_verified_commit` in `STATE.md` to `HEAD`.
 
-The packet is assembled from `SPEC.md` and written to a file. That matters: the
-acceptance criteria arrive **verbatim**, not as your paraphrase of them, and the
-packet has no free-text field for you to explain the implementation through. If
-you could narrate, the verifier would inherit your framing and the whole
-arrangement would be theatre.
+The packet is assembled from `SPEC.md` and `CRITERIA.md` and written to a file.
+That matters twice over.
+
+Each criterion arrives **verbatim**, and it arrives from a file **you did not
+write** — `il-criteria` wrote it before any code existed. A verifier that is
+independent of the implementation but reads a yardstick the implementer chose is
+only half independent, and it is the half that stops mattering the moment a round
+fails: the cheapest way to turn FAIL into PASS is to shorten the ruler. You cannot;
+a hook refuses the write, and moving it after approval closes the gate anyway.
+
+The packet also has no free-text field for you to explain the implementation
+through. If you could narrate, the verifier would inherit your framing and the
+whole arrangement would be theatre.
 
 If several packets come back, each names the subagent it belongs to — a REQ tagged
 `[circuit]` routes to a circuit verifier when one is configured.
@@ -44,6 +52,25 @@ attempt — however well meant — to get the verdict you expect.
 The verifier can read and run. It cannot write anything except one file, and that
 is enforced by a hook rather than by its own configuration, so it holds even if
 the agent decides otherwise.
+
+### On Codex
+
+Use `spawn_agent` with `fork_turns="none"` — the packet is the whole prompt, and
+`"none"` is what keeps your conversation out of it. Passing anything else hands
+the verifier the implementation history and there is no longer anything
+independent about the verdict.
+
+Building the packet arms one short-lived, single-use write to `VERIFY.md`.
+Codex's `spawn_agent` has no per-agent environment parameter, so none is needed.
+If the write fails, rebuild the packet to issue a fresh grant.
+
+**Be straight with the human about what this is worth.** On Claude Code the host
+stamps the agent's identity onto every tool call and the model cannot forge it. On
+Codex the identity is a label the caller sets, so the rule that only the verifier
+writes `VERIFY.md` is a one-use capability convention here, not an identity lock.
+`$il-console doctor` says the
+same thing. Do not describe the verdict as more independent than it is — the
+context isolation is real; the identity is not attested.
 
 ---
 
@@ -82,6 +109,8 @@ which needs a re-approval, not to quietly downgrade the requirement.
 
 - Do not re-run the verifier hoping for a different answer.
 - Do not argue with a FAIL in this session. If it is wrong, the packet or the
-  acceptance criterion is wrong — fix that, visibly.
+  criterion is wrong — and fixing the criterion means re-running `il-criteria` and
+  re-approving, visibly. You cannot edit `CRITERIA.md`, which is the point: a
+  failing round is exactly when moving the yardstick is most tempting.
 - Do not write `VERIFY.md` yourself. If the verifier could not, that is a finding.
 - Do not mark a feature done while any REQ is unjudged.

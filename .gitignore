@@ -6,5 +6,14 @@ Thumbs.db
 # Local scratch, never committed
 scratch/
 
+# Local agent settings
+.claude/settings.local.json
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
 # NOTE: .interlocking/ is intentionally NOT ignored.
 # Harness artifacts are committed so work can resume on another machine (D-007).

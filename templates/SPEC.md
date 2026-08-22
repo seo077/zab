@@ -6,7 +6,11 @@
   approval binds to — change a REQ and the gate closes again.
 
   Keep prose in whatever language you work in. Keep IDs and keys in English:
-  REQ-001, ASM-001, "Acceptance:" — the hook parses those.
+  REQ-001, ASM-001 — the hook parses those.
+
+  You do not write the acceptance criteria. They live in CRITERIA.md, written by
+  il-criteria, which did not sit in the interview and will not write the code.
+  The gate binds to both files.
 -->
 
 ## Background
@@ -18,6 +22,26 @@ What is this, and what did we find out before writing any of it down?
 Cite sources with the date you read them. "Everyone knows" is not a source.
 
 - [finding] — <url> (read YYYY-MM-DD)
+
+## Decisions
+
+<!--
+  What the interview settled, one entry per question that had a real fork in it.
+  This is the part of the spec the human actually owns, so it is the first thing
+  the design brief shows them (`/il:design`).
+
+  Record the answer in THEIR words, not your paraphrase of it, and name the REQs
+  it produced. Three months from now "why is it done this way" is answerable from
+  here or it is not answerable at all.
+
+  Outside the normative markers on purpose: adding the record of a decision must
+  never cost a re-approval.
+-->
+
+DEC-001 <what was settled, in one line>
+  Asked: <the question you put to them>
+  Answer: <what they said>
+  Lands in: REQ-###, REQ-###
 
 ## Size
 
@@ -32,18 +56,25 @@ A feature is *one verification's worth of work*: if a verifier cannot judge
 ## Requirements
 
 <!--
-  One requirement per REQ. Each needs an "Acceptance:" line or G0 will refuse.
-  Acceptance must be something a separate agent can RUN or POINT AT — a command,
-  a status code, a number with a unit, a file:line. "Works correctly" is not one.
+  One requirement per REQ: what the system does, in one sentence. Continuation
+  lines add detail.
+
+  Do NOT write the criterion here. il-criteria writes one per REQ into
+  CRITERIA.md, and G0 refuses any REQ that has no entry there. The separation is
+  the point — a requirement graded against a yardstick its own author chose is
+  graded by the party being measured, and the cheapest way out of a failing round
+  is to shorten the ruler.
+
+  What you owe the criteria agent is a requirement precise enough to be judged.
+  It cannot fix an unclear one — it can only record that it is unjudgeable, which
+  a human then reads on the approval screen.
 
   Optional domain tag routes verification: REQ-007 [circuit] ...
 -->
 
 REQ-001 <what the system does, in one sentence>
-  Acceptance: <the command to run, or the observable fact, with numbers and units>
 
 REQ-002 <...>
-  Acceptance: <...>
 
 ## Threat model
 

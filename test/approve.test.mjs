@@ -11,11 +11,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseIlDirective, signToken } from '../hooks/il.mjs';
+import { parseIlDirective, signToken, specHash } from '../hooks/il.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'il.mjs');
 
@@ -27,23 +27,59 @@ Session cookies, researched on 2026-08-16. Contains a typo: teh.
 <!-- il:normative:begin -->
 ## Requirements
 REQ-001 The user can log in with email and password.
-  Acceptance: POST /login with valid credentials returns 200 and sets a session cookie.
 
 REQ-002 A session expires after 30 minutes of inactivity.
-  Acceptance: a request made 31 minutes after the previous one returns 401.
 
 ## Threat model
 Asset: session cookie. Threat: theft via XSS. Mitigation: HttpOnly + Secure.
 <!-- il:normative:end -->
 `;
 
-function setup({ spec = SPEC, policy = null } = {}) {
+// The yardstick, as il-criteria would have written it: one entry per REQ, in a
+// file the session that wrote the SPEC cannot touch.
+const CRITERIA = `# CRITERIA — 001-login
+
+<!-- il:normative:begin -->
+
+REQ-001
+  Judged: POST /login with valid credentials returns 200 and sets a session cookie.
+  Method: run \`npm test -- login\`
+
+REQ-002
+  Judged: a request made 31 minutes after the previous one returns 401.
+  Method: run \`npm test -- session-expiry\`
+
+<!-- il:normative:end -->
+`;
+
+/**
+ * A cold review that clears Gate 1 for one specific spec/criteria pair. The
+ * hashes are what makes it specific: change either document afterwards and this
+ * same file stops clearing anything.
+ */
+const readyReview = (spec, criteria) => `# REVIEW — 001-login
+
+## Independence evidence
+- critic: il-spec-critic / subagent / fresh context, interview not read
+- reviewed: spec ${specHash(spec).slice(0, 8)} criteria ${specHash(criteria).slice(0, 8)}
+
+## Blockers
+
+VERDICT: READY
+`;
+
+function setup({ spec = SPEC, criteria = CRITERIA, review, policy = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'il-appr-'));
   const home = mkdtempSync(join(tmpdir(), 'il-home-'));
-  mkdirSync(join(dir, '.interlocking', 'work', '001-login'), { recursive: true });
+  const work = join(dir, '.interlocking', 'work', '001-login');
+  mkdirSync(work, { recursive: true });
   mkdirSync(join(dir, 'src'), { recursive: true });
   writeFileSync(join(dir, '.interlocking', 'current'), '001-login\n');
-  writeFileSync(join(dir, '.interlocking', 'work', '001-login', 'SPEC.md'), spec);
+  writeFileSync(join(work, 'SPEC.md'), spec);
+  if (criteria !== null) writeFileSync(join(work, 'CRITERIA.md'), criteria);
+  // `undefined` means "the default READY review"; `null` means "no REVIEW.md".
+  const rv = review === undefined ? readyReview(spec, criteria ?? '') : review;
+  if (rv !== null) writeFileSync(join(work, 'REVIEW.md'), rv);
   if (policy) writeFileSync(join(dir, '.interlocking', 'policy.json'), JSON.stringify(policy, null, 2));
   return { dir, home };
 }
@@ -295,14 +331,109 @@ test('approving with no SPEC is refused — there would be nothing to bind to', 
 // G0 has a red light. A gate that cannot refuse is decoration.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('a requirement with no acceptance criterion refuses the approval', () => {
-  const env = setup({ spec: SPEC.replace(/ {2}Acceptance: a request made 31[\s\S]*?401\.\n/, '') });
+test('a requirement with no criterion refuses the approval', () => {
+  const env = setup({ criteria: CRITERIA.replace(/REQ-002[\s\S]*?session-expiry\`\n/, '') });
   const r = prompt('/il:approve', env);
   const msg = JSON.parse(r.stdout).systemMessage ?? '';
   assert.match(msg, /refused/i);
   assert.match(msg, /REQ-002/);
   assert.equal(tokenFiles(env.home).length, 0, 'nothing may be recorded');
   assert.ok(denyReasonOf(writeTo('src/auth.ts', env)), 'and the gate stays shut');
+});
+
+test('no CRITERIA.md at all refuses the approval', () => {
+  const env = setup({ criteria: null });
+  const r = prompt('/il:approve', env);
+  assert.match(JSON.parse(r.stdout).systemMessage ?? '', /refused/i);
+  assert.equal(tokenFiles(env.home).length, 0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gate 1 — the critic read it cold, and the gate asks what it found.
+//
+// The critic is a model, so its verdict must never be final over a person's:
+// every refusal below has to be passable with `despite-review`, and the fact that
+// it was has to survive into the record.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('no REVIEW.md refuses the approval — nobody has read this cold yet', () => {
+  const env = setup({ review: null });
+  const msg = JSON.parse(prompt('/il:approve', env).stdout).systemMessage ?? '';
+  assert.match(msg, /refused/i);
+  assert.match(msg, /REVIEW\.md/);
+  assert.equal(tokenFiles(env.home).length, 0);
+});
+
+test('a NOT YET verdict refuses the approval and quotes the first blocker', () => {
+  const env = setup({
+    review: readyReview(SPEC, CRITERIA)
+      .replace('VERDICT: READY', 'VERDICT: NOT YET')
+      .replace('## Blockers\n', '## Blockers\nREQ-002  the criterion names a test that does not exist\n'),
+  });
+  const msg = JSON.parse(prompt('/il:approve', env).stdout).systemMessage ?? '';
+  assert.match(msg, /refused/i);
+  assert.match(msg, /NOT YET/);
+  assert.match(msg, /does not exist/, 'the human is told what the objection actually was');
+  assert.equal(tokenFiles(env.home).length, 0);
+});
+
+test('a human can overrule the critic, and the record says they did', () => {
+  const env = setup({ review: readyReview(SPEC, CRITERIA).replace('VERDICT: READY', 'VERDICT: NOT YET') });
+  const msg = JSON.parse(prompt('/il:approve despite-review', env).stdout).systemMessage ?? '';
+  assert.match(msg, /approved/i);
+  assert.match(msg, /over the critic/i, 'the approval line says it went over an objection');
+  assert.equal(tokenFiles(env.home).length, 1);
+  const token = JSON.parse(readFileSync(tokenFiles(env.home)[0], 'utf8'));
+  assert.equal(token.review_overruled, true);
+});
+
+test('a review of a different spec does not clear this one', () => {
+  // The commonest way this happens is honest: the critic ran, the human fixed a
+  // REQ, and the old READY is still sitting there looking valid.
+  const env = setup({ review: readyReview(SPEC.replace('REQ-002', 'REQ-009'), CRITERIA) });
+  const msg = JSON.parse(prompt('/il:approve', env).stdout).systemMessage ?? '';
+  assert.match(msg, /refused/i);
+  assert.equal(tokenFiles(env.home).length, 0);
+});
+
+test('a review of a different CRITERIA does not clear this one either', () => {
+  // This is the one that matters: the yardstick moved after it was reviewed.
+  const env = setup({ review: readyReview(SPEC, CRITERIA.replace('31 minutes', '90 minutes')) });
+  assert.match(JSON.parse(prompt('/il:approve', env).stdout).systemMessage ?? '', /refused/i);
+  assert.equal(tokenFiles(env.home).length, 0);
+});
+
+test('prose in REVIEW.md is not a verdict', () => {
+  const env = setup({ review: readyReview(SPEC, CRITERIA).replace('VERDICT: READY', 'Looks READY to me!') });
+  assert.match(JSON.parse(prompt('/il:approve', env).stdout).systemMessage ?? '', /refused/i);
+  assert.equal(tokenFiles(env.home).length, 0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The approval binds to the yardstick, not only to the requirements.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('shortening a criterion after approval re-closes the gate', () => {
+  // The one edit that turns a failing round into a passing one. If the gate does
+  // not notice this, independent verification is decorative.
+  const env = setup();
+  prompt('/il:approve', env);
+  assert.equal(denyReasonOf(writeTo('src/auth.ts', env)), null, 'open first');
+
+  writeFileSync(
+    join(env.dir, '.interlocking', 'work', '001-login', 'CRITERIA.md'),
+    CRITERIA.replace('a request made 31 minutes after the previous one returns 401.', 'the session eventually ends.')
+  );
+  const why = denyReasonOf(writeTo('src/auth.ts', env));
+  assert.ok(why, 'moving the yardstick must re-close the gate');
+  assert.match(why, /CRITERIA\.md changed/i);
+});
+
+test('deleting CRITERIA.md after approval re-closes the gate', () => {
+  const env = setup();
+  prompt('/il:approve', env);
+  rmSync(join(env.dir, '.interlocking', 'work', '001-login', 'CRITERIA.md'));
+  assert.ok(denyReasonOf(writeTo('src/auth.ts', env)), 'a missing yardstick is a closed gate');
 });
 
 test('a missing threat model refuses the approval — mitigations become requirements', () => {

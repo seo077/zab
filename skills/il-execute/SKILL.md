@@ -42,12 +42,19 @@ sees nothing else:
 ① role + definition of done
 ② the CONTEXT.md conventions that actually apply (not the whole file)
 ③ the task entry verbatim
-④ the REQs it covers, with acceptance criteria in full
+④ the REQs it covers, and for each the criterion from CRITERIA.md in full
 ⑤ the `produces` of every task it depends on   ← the one people forget
 ```
 
 **2 · Delegate it.** A fresh subagent per task. Do not implement it yourself in the
 main session — that is what fills the context you are trying to protect.
+
+On Codex, that is `spawn_agent` with the packet as the message. Unlike the
+verifier, `fork_turns` here is a judgement call rather than a rule: the packet is
+supposed to be self-sufficient, so `"none"` is the default and is also the honest
+test of whether you actually made it self-sufficient. Do not set `IL_AGENT` — an
+implementing agent has no business writing any of the three judgement files, and
+leaving it unset is what keeps that true.
 
 **3 · Take back three lines.** Verdict, files touched, one caveat. Nothing more.
 If you let a subagent return its full reasoning, the main session is polluted
