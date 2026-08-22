@@ -2096,6 +2096,10 @@ function judgementGrantPath(home, pid, artifact) {
   return join(storeDir(home, pid), 'judgement-grants', `${artifact}.json`);
 }
 
+function projectJudgementGrantPath(projectDir, feature, artifact) {
+  return join(projectDir, HARNESS_DIR, '.judgement-grants', `${feature}.${artifact}.json`);
+}
+
 /**
  * Codex does not attest subagent identity and spawn_agent cannot set per-agent
  * environment variables. Building the fixed packet therefore arms one
@@ -2113,34 +2117,64 @@ function armJudgementGrant(ctx, artifact, owner) {
     granted_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + JUDGEMENT_GRANT_MS).toISOString(),
   };
-  const ok = writeSigned(ctx.home, pid, join('judgement-grants', `${artifact}.json`), grant);
-  audit(ctx.home, pid, { at: grant.granted_at, event: 'judgement-arm', feature: ctx.feature, artifact, owner, ok });
+  let storage = 'external';
+  let ok = writeSigned(ctx.home, pid, join('judgement-grants', `${artifact}.json`), grant);
+  if (!ok) {
+    // Codex CLI reports run inside the workspace sandbox. On managed Windows
+    // builds that process can read ~/.interlocking/key but cannot create the
+    // short-lived grant beside it. Keep the human approval store external, but
+    // fall back to a signed, single-use capability under the project harness.
+    // The signature still prevents an ordinary edit from minting a grant.
+    storage = 'project';
+    ok = writeSignedPath(
+      ctx.home,
+      projectJudgementGrantPath(ctx.projectDir, ctx.feature, artifact),
+      grant
+    );
+  }
+  audit(ctx.home, pid, { at: grant.granted_at, event: 'judgement-arm', feature: ctx.feature, artifact, owner, storage, ok });
   return ok;
 }
 
 function consumeJudgementGrant(ctx, artifact, owner) {
   if (detectHost({}, ctx.env) !== 'codex' || !ctx.feature) return false;
   const pid = projectId(ctx.projectDir);
-  const path = judgementGrantPath(ctx.home, pid, artifact);
-  const grant = readJsonSafe(path);
   const key = loadKey(ctx.home);
-  const valid = Boolean(
-    key &&
+  if (!key) return false;
+  const paths = [
+    judgementGrantPath(ctx.home, pid, artifact),
+    projectJudgementGrantPath(ctx.projectDir, ctx.feature, artifact),
+  ];
+  for (const path of paths) {
+    const grant = readJsonSafe(path);
+    const valid = Boolean(
       verifyToken(key, grant) &&
-      grant?.kind === 'judgement-write' &&
-      grant?.feature === ctx.feature &&
-      grant?.artifact === artifact &&
-      grant?.owner === owner &&
-      Date.parse(grant?.expires_at) > Date.now()
-  );
-  if (!valid) return false;
-  try {
-    unlinkSync(path);
-  } catch {
-    return false;
+        grant?.kind === 'judgement-write' &&
+        grant?.feature === ctx.feature &&
+        grant?.artifact === artifact &&
+        grant?.owner === owner &&
+        Date.parse(grant?.expires_at) > Date.now()
+    );
+    if (!valid) continue;
+    try {
+      unlinkSync(path);
+    } catch {
+      continue;
+    }
+    // A successful write consumes the capability everywhere. This prevents a
+    // stale fallback from granting a second write if storage availability flips.
+    for (const other of paths) {
+      if (other === path) continue;
+      try {
+        unlinkSync(other);
+      } catch {
+        /* absent or inaccessible is already consumed enough */
+      }
+    }
+    audit(ctx.home, pid, { at: new Date().toISOString(), event: 'judgement-consume', feature: ctx.feature, artifact, owner });
+    return true;
   }
-  audit(ctx.home, pid, { at: new Date().toISOString(), event: 'judgement-consume', feature: ctx.feature, artifact, owner });
-  return true;
+  return false;
 }
 
 function audit(home, pid, entry) {
@@ -3439,9 +3473,12 @@ function blessPolicy(home, pid, policy) {
 }
 
 function writeSigned(home, pid, relPath, token) {
+  return writeSignedPath(home, join(storeDir(home, pid), relPath), token);
+}
+
+function writeSignedPath(home, full, token) {
   const key = loadKey(home);
   if (!key) return false;
-  const full = join(storeDir(home, pid), relPath);
   if (!ensureDir(dirOf(full))) return false;
   try {
     writeFileSync(full, JSON.stringify({ ...token, sig: signToken(key, token) }, null, 2), 'utf8');

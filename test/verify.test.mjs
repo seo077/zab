@@ -234,6 +234,34 @@ test('Codex packet grants one write without a per-agent environment variable', (
   assert.equal(denied(second), true, 'the capability must be single-use');
 });
 
+test('Codex packet falls back to the project when the sandbox cannot write the external grant store', () => {
+  const env = project();
+  writeFileSync(join(env.home, 'key'), Buffer.alloc(32, 7));
+  writeFileSync(join(env.home, 'projects'), 'sandbox-blocked');
+
+  const packet = runCodex('criteria-packet', [], env, '');
+  assert.equal(packet.status, 0, packet.stderr);
+  const fallback = join(
+    env.dir,
+    '.interlocking',
+    '.judgement-grants',
+    '001-login.CRITERIA.md.json'
+  );
+  assert.ok(existsSync(fallback), 'expected a signed project-local fallback grant');
+
+  const target = join(env.dir, '.interlocking', 'work', '001-login', 'CRITERIA.md');
+  const input = JSON.stringify({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Write',
+    tool_input: { file_path: target },
+  });
+  const first = runCodex('pre-write', [], env, input);
+  assert.equal(denied(first), false, first.stdout);
+  assert.equal(existsSync(fallback), false, 'the fallback capability must be consumed');
+  const second = runCodex('pre-write', [], env, input);
+  assert.equal(denied(second), true, 'the fallback capability must remain single-use');
+});
+
 test('Claude Code still requires attested agent identity', () => {
   const env = project();
   runClaude('criteria-packet', [], env, '');
