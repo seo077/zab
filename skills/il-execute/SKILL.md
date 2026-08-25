@@ -10,6 +10,10 @@ The main session stays clean so that it can still reason about the whole feature
 after fifteen tasks; the implementing happens in fresh contexts that are thrown
 away.
 
+This workflow is for approved `feature` work. Trivial and eligible low-risk
+`small` changes use the recorded override fast path in `il-spec`; do not turn a
+one-step change into a one-task feature merely to apply this loop.
+
 ---
 
 ## Turning PLAN into TASKS
@@ -78,7 +82,10 @@ session start in thirty seconds instead of reconstructing progress from source.
 ## When a task fails
 
 Retry **at most twice**. Then stop and escalate — an agent looping on a failing
-task damages the codebase and burns the user's budget.
+task damages the codebase and burns the user's budget. Use fewer retries when the
+failure is deterministic. A second identical run is useful only when the first
+failure plausibly came from nondeterminism or transient infrastructure; never
+spend both retries by default.
 
 On escalation: set the task `blocked`, write what you tried and what you observed
 into `STATE.md`, and ask the human. Do not silently change the approach: a task

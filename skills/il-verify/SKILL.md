@@ -10,6 +10,36 @@ output is not verification, whatever it concludes. Your job is to hand the probl
 to something that has not been told what was built, and then to record what comes
 back without softening it.
 
+This independent acceptance pass is for approved `feature` work. Eligible
+low-risk `small` changes already take the recorded fast path and receive one
+targeted check in the implementing session; do not retrospectively expand them
+into full acceptance verification.
+
+## Before delegating: bound the pass
+
+Run one independent pass over the REQs affected by the implementation range. Do
+not rerun unchanged REQs merely because they exist in the same long-lived SPEC,
+unless the diff crosses a shared invariant they depend on. State that dependency
+explicitly in the packet when it does.
+
+An unavailable network, browser, device, credential, executable, or sandbox
+permission is a verification-environment result, not evidence that the product
+requirement or SPEC is wrong. Do not add a product REQ, rewrite acceptance scope,
+or reopen the whole design merely to make the verifier environment reproduce the
+implementer's environment.
+
+For an environmental INCONCLUSIVE:
+
+1. confirm it once with diagnostics;
+2. use an already-approved equivalent offline artifact or command if one exists;
+3. otherwise record INCONCLUSIVE and ask the human whether to supply the missing
+   environment/evidence or accept the residual uncertainty.
+
+Do not repeatedly rebuild packets or launch fresh agents for the same unavailable
+capability. Amend and re-approve the SPEC only when the promised behavior or the
+meaning of PASS actually changes, not when a tool path, runner availability, or
+evidence transport needs repair.
+
 ---
 
 ## 1 · Build the packet
@@ -17,7 +47,7 @@ back without softening it.
 Do not write it yourself. Run:
 
 ```
-!`node "${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs" verify-packet <from>..<to>`
+!`node "${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs" verify-packet <from>..<to> <affected REQ ids...>`
 ```
 
 The range runs from `last_verified_commit` in `STATE.md` to `HEAD`.

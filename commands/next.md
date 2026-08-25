@@ -11,6 +11,9 @@ allowed-tools: Bash(node:*)
 
 Run the next task. Use the `il-execute` skill and follow it.
 
+This command is for an approved feature. Do not create a one-task feature to run
+localized low-risk work that belongs on the recorded override fast path.
+
 **Refuse to start if the gate is CLOSED.** The spec is not approved, so there is
 nothing legitimate to implement yet. Say so and point at `/il:approve`.
 

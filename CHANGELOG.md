@@ -9,6 +9,15 @@ carries its own `version`, and Codex serves the cached build until that string m
 
 ## [Unreleased]
 
+### Changed
+
+- Make assurance proportional: trivial and localized low-risk small changes use
+  a recorded override plus one targeted check, without miniature SPEC/critic/
+  subagent/independent-verifier ceremony.
+- Bound verification to affected requirements and classify unavailable network,
+  browser, credentials, tools, or sandbox access as environmental INCONCLUSIVE;
+  these no longer justify repeated agents or product-SPEC amendments by default.
+
 ### Fixed
 
 - Codex help no longer points to the nonexistent `$il-console onboard` mode.

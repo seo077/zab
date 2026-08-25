@@ -51,6 +51,11 @@ A feature is *one verification's worth of work*: if a verifier cannot judge
 "are these REQs met?" in a day, it is too big. Rough bounds: 3–10 REQs,
 5–15 tasks, 1–2 weeks. An epic gets decomposed first — see CONTEXT.md's roadmap.
 
+`trivial` and eligible low-risk `small` work should not have a SPEC at all; they
+use the recorded override fast path. If this template is being filled in, either
+the work is a `feature`/`epic` slice or a documented risk trigger made the full
+path necessary.
+
 <!-- il:normative:begin -->
 
 ## Requirements

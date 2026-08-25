@@ -14,13 +14,15 @@ Start a new interlocking feature for: **$ARGUMENTS**
 
 Use the `il-spec` skill and follow it. In outline:
 
-1. If `.interlocking/` does not exist yet, create it from the plugin's `templates/`:
+1. Size the requested change before creating an active feature. Trivial and
+   eligible low-risk small work uses the recorded override fast path in `il-spec`;
+   do not create `work/`, change `.interlocking/current`, or launch judgement
+   agents for it.
+2. If the full feature path is needed and `.interlocking/` does not exist yet, create it from the plugin's `templates/`:
    `policy.json`, `CONTEXT.md`, and a `work/` directory.
-2. Pick the next feature number, create `work/<NNN>-<slug>/`, and write the feature
+3. Pick the next feature number, create `work/<NNN>-<slug>/`, and write the feature
    name into `.interlocking/current`. **This closes the code gate** — that is
    intended, and it is why the spec comes first.
-3. Size it. Trivial work does not belong here: tell the human to use
-   `/il:override <reason>` instead. An epic gets decomposed before anything else.
 4. Research, interview, threat model, `SPEC.md`, `STATE.md`. Write each interview
    answer down as a `DEC-###` as you get it. **Do not write acceptance criteria** —
    they are not yours to write.

@@ -28,13 +28,42 @@ Classify before doing anything else, and say why:
 
 | Size | Means | Path |
 |---|---|---|
-| `trivial` | a typo, a message, a constant | Tell the human to use `/il:override <reason>`. No spec. |
-| `small` | one REQ, one task, obvious acceptance | Short spec, skip research |
+| `trivial` | a typo, a message, a constant | Use the recorded fast path below. No spec. |
+| `small` | one low-risk outcome, one task, obvious targeted check | Use the recorded fast path below unless a risk trigger applies. |
 | `feature` | 3–10 REQs, 5–15 tasks, 1–2 weeks | The full path below |
 | `epic` | more than that, or several subsystems | **Decompose first** — see below |
 
 The test for `feature` is not effort, it is verification: **can one verifier judge
 "are these REQs met?" in a day?** If not, it is an epic.
+
+### Recorded fast path for trivial and small work
+
+Do not create a miniature feature ceremony. If a feature gate is active, ask the
+human to open an override with a concrete scope. With no active feature there is
+no gate to bypass, so proceed directly. Make the change in the main session, run
+the narrowest existing
+check that can catch a regression, and report the changed files and result. Do not
+spawn criteria, critic, implementer, or verifier agents; do not create SPEC,
+CRITERIA, REVIEW, TASKS, or VERIFY artifacts. The override log is the audit record.
+
+A `small` change is eligible only when all of these are true:
+
+- one localized outcome and one implementation step;
+- no new dependency, public API or persisted-data/schema contract;
+- no authentication, authorization, secrets, privacy, money, destructive data
+  operation, concurrency, deployment, or other hard-to-reverse behavior;
+- an existing targeted check, or a direct deterministic observation, settles it;
+- failure has limited blast radius and rollback is obvious.
+
+If any item is false or genuinely uncertain, use the feature path. Do not promote
+work merely because the repository is large or because exhaustive tests exist.
+Classify the risk and behavioral surface of this change, not the size of the
+surrounding system.
+
+For a gated `small` change, propose an override reason in this form so scope
+remains auditable: `small: <outcome>; check: <command or observation>`. The human
+still opens the override; the model cannot do so itself. Without an active feature,
+put the same outcome and check in the commit or final report instead.
 
 ### If it is an epic
 

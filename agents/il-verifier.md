@@ -50,6 +50,12 @@ check is the exact failure this role exists to prevent.
 Run only the commands the packet lists. If a criterion needs a command that is not
 listed, that is INCONCLUSIVE plus the command you would need.
 
+Run each required command once. Retry only when captured evidence indicates a
+transient failure, and at most once; record both attempts. Missing network,
+credentials, browser/device access, executables, or sandbox permission is
+INCONCLUSIVE, not FAIL. Do not substitute infrastructure availability for product
+behavior and do not recommend adding requirements to accommodate your runtime.
+
 ## Recording the verdict
 
 Write your findings with **exactly one command**, to the single path the packet

@@ -2376,7 +2376,7 @@ export function composeSessionContext(ctx) {
     if (gate.lease) {
       out.push('');
       out.push(`⚠ Files were written under an override (reason: ${truncate(gate.lease.reason, 60)}).`);
-      out.push(`  ${work}/VERIFY.md must account for them.`);
+      out.push(`  Account for them in VERIFY.md, or run the targeted check named by a small: override.`);
     }
 
     out.push('');
@@ -3251,7 +3251,7 @@ export function composeHelp(ctx) {
       const max = gate.lease.max_edits ?? '?';
       warn.push(
         `⚠ open on an override lease, not an approval (${used}/${max} edits, reason: ${gate.lease.reason ?? '?'}).`,
-        '  The spec is still unapproved and VERIFY.md must account for these files.'
+        '  The spec is still unapproved; use VERIFY.md or the targeted check named by a small: override.'
       );
     }
 
@@ -3749,7 +3749,7 @@ function handleOverride(directive, ctx, pid, feature, session) {
 
   tellBoth(
     ok
-      ? `[il] override granted — ${minutes} min / ${maxEdits} edits.\n     reason: ${lease.reason}\n     Recorded in the audit log and shown at every session start until VERIFY covers it.`
+      ? `[il] override granted — ${minutes} min / ${maxEdits} edits.\n     reason: ${lease.reason}\n     Recorded in the audit log. Feature work needs VERIFY; a small: override needs its named targeted check.`
       : '[il] could not write the override lease — il is in advisory mode.',
     ok
       ? `[il] The human granted an override for ${feature} (reason: ${lease.reason}). ` +

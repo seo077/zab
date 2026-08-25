@@ -140,7 +140,7 @@ NEXT: T-012 — session cookie in src/auth/session.ts (SPEC.md#REQ-007)
 | `/il:verify` | Independent acceptance verification |
 | `/il:doctor` | What this installation can actually enforce |
 | **`/il:approve`** | **Human only.** Open the gate. |
-| **`/il:override <reason>`** | **Human only.** Time-boxed, recorded bypass — and the fast lane for typo-sized work. |
+| **`/il:override <reason>`** | **Human only.** Time-boxed, recorded bypass — the fast lane for trivial and localized low-risk work. |
 | **`/il:policy`** | **Human only.** Bless a widened `policy.json`. |
 
 The last three cannot be invoked by the model. They are handled by a hook that
