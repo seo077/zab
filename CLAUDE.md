@@ -131,3 +131,37 @@ interactive session, and an install from the marketplace rather than
   new reader; worth a cleaning pass.
 - **No 갈래 for code.** Software work runs on 범용 until a `코드구현`-style 갈래 is
   made the intended way — by running 파이프라인신설.
+
+## Next
+
+**Translate `pipeline/` and `templates/` to English, on a branch.** Agreed with the
+owner on 2026-11-19; not started. What was settled and what was not:
+
+- Do it on its own branch, not on `main`. `main` stays the Korean release until
+  the translation has been driven through a real `/zab:design` → `/zab:build`.
+- Open question, to ask before starting: keep Korean and English side by side,
+  or move to English only. Two copies must be kept in step on every rule change;
+  one copy means Korean users read English rules. Note the language of the rule
+  documents and the language the agents *write in* are separable — an English
+  rule set can still tell the agents to converse and record in the user's
+  language.
+- File and folder names are Korean too (`부팅.md`, `갈래별/`, `검증기준.md`,
+  `log/실행로그.md`) and `zab.mjs` hard-codes several of them — `classify()`,
+  the manifest keys (`상태`, `모드`, `현재_단계`), `SKIP`, `LOCAL_DIRS`,
+  `DIRECT_LOG`. Renaming them is a code change with tests, not a text change,
+  and it changes the layout of every existing project.
+- `pipeline/b/` defines what an independent verdict is. Translate it last and
+  check it against the original clause by clause; a softened word there changes
+  verdicts.
+- The `D-N` citations stay as they are (see "출처 표기에 대하여" in
+  `pipeline/README.md`).
+
+**Waiting on the owner, not on code:** review `pipeline/` for anything that should
+not be public; rename the GitHub repo to `zab` and make it public (the README
+install line already says `seo077/zab`); then submit at
+`claude.ai/directory/manage` → Submit new → Plugin bundle. The checklist was run
+on 2026-11-19 and nothing failed; the security scan and human review only run in
+the portal. No icon yet.
+
+Housekeeping: branch `ung` is identical to `main` and can be deleted.
+
