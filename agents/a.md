@@ -1,6 +1,6 @@
 ---
 name: a
-description: ung 파이프라인의 A(설계·구현자). Z가 쓴 호출문 전문을 받아 산출물을 만든다. Z의 호출문 없이 쓰지 않는다.
+description: zab 파이프라인의 A(설계·구현자). Z가 쓴 호출문 전문을 받아 산출물을 만든다. Z의 호출문 없이 쓰지 않는다.
 model: inherit
 ---
 

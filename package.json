@@ -1,15 +1,15 @@
 {
-  "name": "ung",
+  "name": "zab",
   "version": "0.1.0",
   "private": true,
-  "description": "Repo tooling for the ung plugin. The plugin itself ships no dependencies and does not require npm to run.",
+  "description": "Repo tooling for the zab plugin. The plugin itself ships no dependencies and does not require npm to run.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/ung.test.mjs",
+    "test": "node test/zab.test.mjs",
     "validate": "claude plugin validate .",
     "check": "npm run validate && npm test"
   }

@@ -1,101 +1,202 @@
-# ung
+# zab
 
-**Claude Code용 Z·A·B 협업 파이프라인.** 사람이 결정하고, 오케스트레이터(Z)가 배치·중계·기록하고, 구현자(A)가 만들고, 만든 과정을 보지 못한 검증자(B)가 판정한다.
+**English** · [한국어](README.ko.md)
 
-*A human-in-the-loop pipeline for Claude Code: an orchestrator that never builds or judges, a builder, and a verifier that never saw the build. The method is written in Korean; an English summary is [below](#in-english).*
-
-```
-/ung:setup    프로젝트 폴더 준비 — input · output · log · pipeline
-/ung:design   Z와 사양을 정하고, B가 검증 기준을 쓰고, 사람이 승인한다
-/ung:build    A가 만들고, 새 세션의 B가 판정하고, 사람이 최종 수락한다
-```
-
-## 설치
-
-Claude Code에서:
+**A Claude Code plugin for work that is expensive to get wrong.**
+The acceptance criteria are written first, a verifier that never saw the build checks the result against them, and a person looks at the actual files at every decision point. It is not limited to code.
 
 ```
-/plugin install ung --marketplace seo077/ung
+/zab:setup     prepare the folder
+/zab:design    settle what to make, and what will count as done
+/zab:build     make it, check it, accept it
 ```
 
-Node 18 이상이 필요하다. 그 밖의 의존성은 없다.
+> **Language note.** The commands and this guide are in English and Korean. The method itself — the role rules and verification criteria the agents read — is written in Korean, and the agents write their working records in Korean. See [What it costs](#what-it-costs).
 
-## 어떻게 도나
+---
 
-```
-/ung:design                                    /ung:build
-┌──────────────────────────────────────┐      ┌───────────────────────────────────────────┐
- 협의 → ★사양 확정 → B 기준 작성 → ★기준 승인  →  A 구현 → ★구현 확인 → B 판정 → ★최종 수락
-                    (→ A 설계 → ★설계 승인)              (조건부·미달이면 A 재작업 → B 재검증)
-```
+## Who this is for
 
-★는 사람이 확인하는 자리다. 거기서 Z는 멈추고, 열어 볼 **파일 경로**를 알려 준다. 내용을 요약해 대신 말하지 않는다.
+**Do not use this for work you can ship fast and fix later.** A typo, a small feature, a throwaway script — lighter tools are better at those, and zab will feel slow and fussy.
 
-지키는 선은 넷이다.
+zab is built for the other kind of work.
 
-1. **기준이 먼저다.** 무엇을 보면 됐다고 할지를 만들기 전에 B가 쓰고, 사람이 승인한다.
-2. **판정은 검증자만 한다.** B는 A와 다른 새 세션이고, 재검증은 직전 검증과도 다른 새 세션이다. Z는 B의 판정을 옮길 뿐 요약하지 않는다.
-3. **A에게는 넉넉히, B에게는 아껴서.** A는 배경과 결정 원문을 다 받는다. B가 받는 것은 대상 경로와 승인 여부 정도다. 미리 들은 것으로 판단하면 독립 검증이 아니기 때문이다.
-4. **한 파일에는 주인이 하나다.** 장부와 공용 로그는 Z만, 산출물은 A만, 기준과 판정은 B만 쓴다.
-
-## 작업 종류 — 파이프라인과 갈래
-
-`/ung:design` 을 실행하면 Z가 쓸 수 있는 파이프라인 목록을 보여 준다.
-
-| 파이프라인 | 무엇 |
+| This kind of work | Examples |
 |---|---|
-| 범용 | 맞는 정의가 없는 일회성·탐색 작업의 기본 골격. 코드 작업도 여기서 시작한다 |
-| 회로분석 | 회로도를 모듈별로 읽어 분석하고 오류·위험·개선점을 진단한다 |
-| 엑셀작업 | 엑셀 작업을 레이아웃 → 출력 두 단계로, 원본을 고치지 않고 해낸다 |
-| 파이프라인신설 | 새 종류의 작업을 위한 파이프라인 한 벌을 만든다 |
+| **One error is a real loss** | circuit analysis, a report with calculations in it, anything handed to someone else |
+| **It runs for days and gets interrupted** | sessions change several times, and progress has to live in records rather than in a conversation |
+| **Someone will later ask "why was it decided this way?"** | work whose decisions and reasons must be traceable |
+| **It is not code** | documents, analysis, spreadsheet work — where there are no tests to run and checking is the hard part |
 
-작업 종류마다 달라지는 지식은 **갈래**로 붙는다. A는 `a/갈래별/<갈래>/` 의 규칙·참고자료·skills를, B는 `b/갈래별/<갈래>/` 의 검증 기준을 읽는다. 되풀이할 새 작업이 생기면 **파이프라인신설**을 한 판 돌려 정의와 갈래 한 벌을 만든다.
+What matters in that kind of work is not speed. It is an answer to **"can this result be trusted?"** That is the one thing zab provides.
 
-## 무엇이 어디에 있나
+## The problem
 
-역할 문서·정의·갈래는 **플러그인 안에 한 벌만** 있다. 프로젝트에 복사하지 않는다.
+Hand a whole job to an AI and three things go wrong.
+
+- **The builder grades its own work.** One session builds and then reports that it went well. It is hard to doubt assumptions you made yourself.
+- **The pass line is drawn afterwards.** Criteria set after seeing the result bend to fit the result.
+- **The person approves a summary.** Read the explanation, move on, and nobody has opened the actual file.
+
+For work you can fix quickly, none of this matters much. For work that is expensive to get wrong, these three are the accident.
+
+## How zab handles it
+
+The work is split across three roles.
+
+| Role | Does | Does not |
+|---|---|---|
+| **You** | Decide. At each checkpoint (★) you open the file and say approve, revise, or hold | — |
+| **Z** — orchestrator | Assigns work, calls A and B, relays results verbatim, keeps the ledger | Build. Judge. Choose for you at a fork |
+| **A** — builder | Designs and builds | Judge |
+| **B** — verifier | Writes the acceptance criteria, then checks the result against them | Fix the result |
+
+And four rules hold throughout.
+
+1. **Criteria come first.** B writes the acceptance criteria from the spec alone, before any result exists. Building starts only after you approve them, and approved criteria stay fixed for that job.
+2. **The verifier does not know how it was built.** The B that checks is a fresh session, separate from A. There is a cap on what Z may tell it — roughly the paths of the files to check and whether you approved. Z may not say "look especially at this" or "A reports it went well". A judgement formed from what you were told in advance is not an independent one.
+3. **A re-check uses fresh eyes too.** After fixes, the B that re-checks is a different session from the previous B, and is told the previous verdict in a single word.
+4. **You look at files, not summaries.** At a ★ Z stops and gives you the **path** to open. It does not summarize the contents for you.
+
+---
+
+## Commands
+
+### `/zab:setup` — prepare the folder
+
+Creates the skeleton in the folder you have open. Run it once. **It never touches a file that already exists.**
 
 ```
-플러그인                          프로젝트 (/ung:setup 이 만든다)
-├─ pipeline/                      ├─ CLAUDE.md · 프로젝트지도.md
-│  ├─ z/  부팅 · 상호작용규칙       ├─ input/     재료
-│  │      · pipelines/<작업>.md    ├─ output/    결과
-│  ├─ a/  부팅 · 공통규칙 · 갈래별/  ├─ pipeline/  이 프로젝트에서 만든 정의·갈래
-│  └─ b/  부팅 · 공통규칙           └─ log/
-│         · 검증기준_공통 · 갈래별/      ├─ manifest.json     Task 장부 (Z만)
-├─ templates/project/                 ├─ 실행로그.md · AI 논의사항.md
-├─ commands/  setup · design · build   └─ T{N}_<작업명>/    Task 방
-├─ agents/    a · b                          검증기준 · (설계명세) · 구현요약/ · 검증요약/
-└─ scripts/ung.mjs
+input/                  where materials go
+output/                 where results come out
+log/manifest.json       the Task ledger — what is in progress and how far
+log/실행로그.md          what was done, step by step
+log/AI 논의사항.md       decisions, and what you said, verbatim
+pipeline/               job definitions created in this project (empty at first)
+프로젝트지도.md          a one-page map of the project
+CLAUDE.md               project guide
 ```
 
-- 한 번 쓰는 **사실**은 프로젝트에, 되풀이하는 **방법**은 파이프라인에 둔다.
-- 플러그인의 `pipeline/` 은 읽기 전용이다. 프로젝트에서 새로 만든 정의·갈래는 프로젝트의 `pipeline/` 에 생기고, 되풀이가 확인되면 이 저장소에 Pull Request로 올린다. 방향은 프로젝트 → 파이프라인 한쪽뿐이다.
-- 파이프라인 한 판이 **Task 하나**(`T1`·`T2`…)다. 재작업은 새 Task가 아니라 Task 안의 반복 `R2`·`R3`이다.
+### `/zab:design` — what to make, and what will count as done
 
-자세한 것은 [pipeline/README.md](pipeline/README.md)와 [pipeline/z/플러그인운용.md](pipeline/z/플러그인운용.md).
+Runs up to the point just **before** building. It builds nothing.
 
-## 이것이 하지 않는 일
+| Step | Who | What happens |
+|---|---|---|
+| 1 | Z ↔ you | Pick the kind of job, and talk until you agree on what to make |
+| ★ | You | **Confirm the spec** |
+| 2 | B | Writes the **verification criteria** from the spec alone, and hands back questions wherever the spec is ambiguous |
+| ★ | You | **Approve the criteria** — open the file yourself; approve or ask for changes |
+| 3 | A | (only for jobs whose design must be settled first) writes a design document |
+| ★ | You | (only then) **Approve the design** |
 
-- **아무것도 막지 않는다.** 훅은 둘뿐이다 — 세션을 열 때 Task 상황판을 보여 주는 것, 그리고 플러그인 자신의 문서(`pipeline/` · `templates/`)를 권한 확인 없이 읽게 하는 것. 어느 쪽도 거절하지 않는다. 규칙은 문서이고, 지키는 것은 역할을 맡은 모델과 ★에서 직접 열어 보는 사람이다.
-- **빠르지 않다.** 기준을 먼저 쓰고, 사람이 여러 번 확인하고, 검증을 새 세션으로 돌린다. 틀려도 되돌리기 쉬운 일에는 과하다 — 그런 판에서는 Z가 검증 생략을 제안할 수 있고, 정하는 것은 사용자다.
-- **Codex는 아직이다.** 지금은 Claude Code만 지원한다.
+If you already know the kind of job, name it: `/zab:design 회로분석`.
 
-## 개발
+### `/zab:build` — make it, check it, accept it
+
+Starts from the approved spec and criteria. If the ledger has no record of the criteria being approved, it does not start and sends you back to `/zab:design`.
+
+| Step | Who | What happens |
+|---|---|---|
+| 1 | A | Builds to the spec into `output/`, and records what it made and what it decided on its own |
+| ★ | You | **Review the build** — open the result yourself |
+| 2 | B (fresh session) | Checks against the approved criteria. Gives evidence per item and a verdict: pass, conditional, or fail |
+| 3 | A → B | If conditional or fail, and you say so, A fixes it and **yet another fresh** B re-checks |
+| ★ | You | **Final acceptance** — read B's verdict in its own words and decide |
+
+You can close the session and come back. The Task board appears when you reopen, and running the same command reads the ledger and resumes where it stopped.
+
+---
+
+## What a run looks like
+
+A small request — "a script that counts words in the text files under `input`" — went into `/zab:design`. This is what happened.
+
+- The user answered "only files directly under `input/`" and also "put the test files in a subfolder of `input/`". Z pointed out that **as stated, the test files would never be counted**, offered three ways to resolve it, and stopped. It did not quietly rewrite the spec.
+- While writing the criteria, B found eight places where the spec alone left the verdict open: does "whitespace" include a full-width space; does `.TXT` count; what happens with zero matching files; where do errors go and what is the exit code.
+- Once the user answered, a **fresh B session** revised the criteria and asked for approval again.
+
+Eight questions that would otherwise have surfaced after the build came out before a line of code was written. For a word counter, that is too much ceremony. If the number that script prints is going into a report, it is not.
+
+---
+
+## How it differs
+
+| Common approach | What happens | zab |
+|---|---|---|
+| One session: "build it and review it" | The same context builds and grades | Building and judging are separate sessions, and the judge is not told how it was built |
+| Plan, get approval, implement | Settles what to build, not **what will count as done** | Verification criteria are written separately from the spec, first, and you approve them |
+| Run a review agent afterwards | The reviewer is handed the implementation summary and reads within that frame | There is a cap on what the verifier may be told |
+| The same party writes requirements and criteria | When a check fails, lowering the bar is the cheapest move | You and Z write the spec; B writes the criteria; only B edits them |
+| The AI summarizes, the person approves | Nobody opens the file | At a checkpoint you get a path, and you open it |
+| Development-only workflow tools | Work with no tests to run has no means of checking | Each kind of job carries its own criteria. Circuit analysis and spreadsheet work ship with theirs |
+
+## What it costs
+
+Stated plainly.
+
+- **It is slow.** Criteria first, three or four human checkpoints, checks run in fresh sessions. Even a small request goes through several steps.
+- **It uses a lot of tokens.** The role documents are long, and the verifier reads its rules from the top on every call.
+- **It enforces nothing.** There are two hooks: one shows the Task board when a session opens, one lets a session read the plugin's own documents without a permission prompt. Neither ever refuses anything. The rules are documents; if a model breaks one, nothing mechanical stops it.
+- **It does not replace your checking.** Approve at a ★ without opening the file and the method is worth half as much.
+- **The method is written in Korean.** The role rules, the criteria and the records the agents write are Korean. The commands work in any language you type, but you will be reading Korean files at the checkpoints.
+- **Claude Code only.** Codex is not supported yet.
+
+---
+
+## Install
+
+Inside Claude Code:
 
 ```
-npm test                              # scripts/ung.mjs
+/plugin install zab --marketplace seo077/zab
+```
+
+Requires Node 18 or later. Nothing else to install.
+
+## Kinds of job
+
+`/zab:design` shows the kinds of job (pipelines) you can pick.
+
+| Pipeline | For |
+|---|---|
+| **범용** (general) | Work with no fixed shape. Code starts here |
+| **회로분석** (circuit analysis) | Reading a schematic module by module, analysing it, and diagnosing errors, risks and improvements |
+| **엑셀작업** (spreadsheet work) | Spreadsheet work in two stages, layout then output, without modifying the original |
+| **파이프라인신설** (new pipeline) | Making a pipeline for a new kind of job you will repeat |
+
+The knowledge that changes with the kind of job is attached separately. Pick circuit analysis and A reads the circuit-analysis rules and references while B reads the circuit-analysis criteria. When you find yourself repeating a kind of work, run **파이프라인신설** once to create its definition; what it creates lands in your project's `pipeline/` folder.
+
+## Where things live
+
+The role documents and job definitions exist **once, inside the plugin**. A project holds only its materials, results and records.
+
+```
+plugin                               project
+├─ pipeline/                         ├─ CLAUDE.md · 프로젝트지도.md
+│  ├─ z/  Z's rules · definitions     ├─ input/      materials
+│  ├─ a/  A's rules · per-job notes   ├─ output/     results
+│  └─ b/  B's rules · criteria        ├─ pipeline/   definitions made in this project
+├─ templates/project/                └─ log/
+├─ commands/  setup · design · build     ├─ manifest.json    the Task ledger
+├─ agents/    a · b                      ├─ 실행로그.md · AI 논의사항.md
+└─ scripts/                              └─ T1_<name>/       everything about one Task
+                                             criteria · build notes · verdicts · call messages
+```
+
+- One run of a job is **one Task** (`T1`, `T2`, …). Fixing and redoing is not a new Task but a repeat inside the same one (`R2`, `R3`).
+- **Every file has one owner.** Only Z writes the ledger and shared logs, only A writes results, only B writes criteria and verdicts.
+- The plugin's `pipeline/` is read-only. If a definition you made in a project proves useful more than once, send it here as a pull request.
+
+The whole method is in [pipeline/README.md](pipeline/README.md); paths and command boundaries for the plugin are in [pipeline/z/플러그인운용.md](pipeline/z/플러그인운용.md).
+
+## Development
+
+```
+npm test                    # tests for scripts
 claude plugin validate .
-claude --plugin-dir .                 # 이 저장소를 플러그인으로 얹어 실행
+claude --plugin-dir .       # run this repo as a plugin
 ```
-
-이 저장소의 예전 설계(훅으로 승인 전 편집을 차단하던 `interlocking`)는 태그 `interlocking-v0.1-final` 에 남아 있다.
-
-## In English
-
-ung packages a working method, not an enforcement layer. One session becomes **Z**, the orchestrator, which assigns work, relays results verbatim and keeps the ledger — and is forbidden to build or to judge. **A** builds. **B** writes the acceptance criteria *before* anything is built, and later a fresh B session, given little more than file paths, judges the result against the criteria the human approved. Every ★ in a pipeline definition is a point where the agents stop and a person opens the file themselves.
-
-`/ung:setup` scaffolds a project folder, `/ung:design` runs up to the last approval before building, and `/ung:build` runs from there to final acceptance. Role documents live once, inside the plugin; a project holds only its materials, results and logs. Nothing is blocked by hooks — the rules are documents.
 
 ## License
 

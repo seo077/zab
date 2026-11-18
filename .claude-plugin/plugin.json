@@ -1,6 +1,6 @@
 {
-  "name": "ung",
-  "displayName": "ung",
+  "name": "zab",
+  "displayName": "zab",
   "version": "0.1.0",
   "description": "Z·A·B 협업 파이프라인 — 사람이 결정하고, 오케스트레이터가 배치·기록하고, 구현자가 만들고, 만든 과정을 보지 못한 검증자가 판정한다. A human-in-the-loop orchestrator / builder / independent-verifier pipeline for Claude Code.",
   "author": {

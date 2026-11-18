@@ -1,7 +1,7 @@
 {
   "_meta": {
     "project": "<프로젝트명>",
-    "pipeline_repo": "plugin:ung",
+    "pipeline_repo": "plugin:zab",
     "updated_at": "<ISO8601>",
     "owner": "Z"
   },
@@ -12,7 +12,7 @@
     "여럿이 동시에 일해도 — Task가 여럿 병렬이어도 — 이 파일에 쓰는 것은 Z 하나다. 그래서 충돌이 나지 않는다.",
     "각 담당의 요약은 이 파일이 아니라 자기 Task 방 안 담당별 파일로 나뉜다: log/T{N}_<작업명>/구현요약/A<N>_*.md · log/T{N}_<작업명>/검증요약/B<N>_*.md",
     "이 파일에는 '어디에 무엇이 있는지'만 적는다. 내용 자체는 각 산출물 파일에 있다.",
-    "_meta.pipeline_repo 의 값 plugin:ung 은 역할 문서·정의가 ung 플러그인 안에 있다는 표지다. 절대경로는 명령과 세션 배너가 알려 준다."
+    "_meta.pipeline_repo 의 값 plugin:zab 은 역할 문서·정의가 zab 플러그인 안에 있다는 표지다. 절대경로는 명령과 세션 배너가 알려 준다."
   ],
 
   "_schema": {

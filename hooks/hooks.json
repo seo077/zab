@@ -1,5 +1,5 @@
 {
-  "description": "ung — Task board banner at session start, and read access to the plugin's own documents. Nothing is blocked.",
+  "description": "zab — Task board banner at session start, read access to the plugin's own documents, and one-owner-per-file for the three roles.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,8 +8,8 @@
           {
             "type": "command",
             "timeout": 15,
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs\" banner || true",
-            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs\" banner }"
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs\" banner || true",
+            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs\" banner }"
           }
         ]
       }
@@ -21,8 +21,19 @@
           {
             "type": "command",
             "timeout": 10,
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs\" allow-read || true",
-            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs\" allow-read }"
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs\" allow-read || true",
+            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs\" allow-read }"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs\" own || true",
+            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs\" own }"
           }
         ]
       }

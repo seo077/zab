@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ung — the only executable in the plugin. Zero dependencies, Node 18+.
+// zab — the only executable in the plugin. Zero dependencies, Node 18+.
 //
 //   setup    scaffold a project folder (never overwrites)
 //   where    print the paths and state Z needs to boot
@@ -124,7 +124,7 @@ export function where(projectDir) {
     '',
   ];
   if (!manifest) {
-    out.push('장부 log/manifest.json 이 없다 — 이 폴더는 아직 준비되지 않았다. /ung:setup 을 먼저 실행한다.');
+    out.push('장부 log/manifest.json 이 없다 — 이 폴더는 아직 준비되지 않았다. /zab:setup 을 먼저 실행한다.');
     return out.join('\n');
   }
   out.push('파이프라인 정의 (P = 플러그인, L = 이 프로젝트):');
@@ -140,30 +140,35 @@ export function where(projectDir) {
     out.push(`  ${role}/ P: ${p.join(' · ') || '없음'} / L: ${l.join(' · ') || '없음'}`);
   }
   out.push('', 'Task 상황판 =', ...taskBoard(manifest), `마지막 기록 = ${lastRecord(manifest)}`);
+  const edits = directEdits(projectDir);
+  if (edits.length) {
+    out.push('', `Z가 A의 파일을 직접 고친 기록 (${DIRECT_LOG}) — 훅이 남긴 것이다. 다음 ★에서 사용자에게 그대로 보인다:`);
+    for (const e of edits.slice(-20)) out.push(`  ${e['시각']} ${e['파일']} (${(e['진행중'] ?? []).join(', ') || 'Task 없음'})`);
+  }
   return out.join('\n');
 }
 
 export function banner(projectDir) {
   const manifest = readManifest(projectDir);
-  // Stay silent anywhere that is not an ung project — including folders that
+  // Stay silent anywhere that is not an zab project — including folders that
   // happen to keep some other log/manifest.json.
-  if (manifest?._meta?.pipeline_repo !== 'plugin:ung') return null;
+  if (manifest?._meta?.pipeline_repo !== 'plugin:zab') return null;
   const project = manifest._meta?.project || path.basename(projectDir);
   const board = ['Task 상황판 =', ...taskBoard(manifest), `마지막 기록 = ${lastRecord(manifest)}`].join('\n');
   const human = [
-    `본 작업 공간 = ${project} (ung)`,
+    `본 작업 공간 = ${project} (zab)`,
     '',
     board,
     '',
-    '시작 = /ung:design (사양·기준·설계) → /ung:build (구현·검증·수락) / 자유 질문 가능',
+    '시작 = /zab:design (사양·기준·설계) → /zab:build (구현·검증·수락) / 자유 질문 가능',
   ].join('\n');
   const model = [
-    '이 폴더는 ung 프로젝트다 (Z·A·B 파이프라인).',
+    '이 폴더는 zab 프로젝트다 (Z·A·B 파이프라인).',
     `파이프라인 저장소 P = ${PIPELINE}`,
     `템플릿 루트 E = ${TEMPLATE}`,
     `프로젝트 루트 = ${projectDir}`,
     board,
-    '사용자가 /ung:design 또는 /ung:build 를 실행하기 전에는 Task를 개설하거나 역할을 호출하지 않는다. 일반 질문은 그대로 답한다.',
+    '사용자가 /zab:design 또는 /zab:build 를 실행하기 전에는 Task를 개설하거나 역할을 호출하지 않는다. 일반 질문은 그대로 답한다.',
   ].join('\n');
   return {
     systemMessage: human,
@@ -202,9 +207,138 @@ export function allowRead(event, bases = [PIPELINE, TEMPLATE], platform = proces
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'allow',
-      permissionDecisionReason: "ung: the plugin's own pipeline documents (read-only)",
+      permissionDecisionReason: "zab: the plugin's own pipeline documents (read-only)",
     },
   };
+}
+
+// ── ownership ───────────────────────────────────────────────────────────────
+//
+// "한 파일에는 주인이 하나다" is the one rule of the method a machine can check
+// without reading anyone's mind: who is writing, and where. Everything else —
+// the ★ stops, the cap on what B is told — stays a document.
+
+export const PLUGIN = 'zab';
+
+// Only this plugin's own agents carry a role. A bare `a`, or another plugin's
+// `x:a`, is a stranger: an unrecognised near-miss must never be read as B.
+export function roleOf(agentType) {
+  if (!agentType) return 'Z'; // the main session
+  if (agentType === `${PLUGIN}:a`) return 'A';
+  if (agentType === `${PLUGIN}:b`) return 'B';
+  return 'other';
+}
+
+// Whose file is this? `rel` is relative to the project root, forward slashes.
+export function classify(rel) {
+  if (/^pipeline\/b\//.test(rel)) return 'B';
+  if (/^output\//.test(rel)) return /\/tmp\//.test(rel) ? null : 'A';
+  if (['log/manifest.json', 'log/실행로그.md', 'log/AI 논의사항.md', '프로젝트지도.md'].includes(rel)) return 'Z';
+  const m = /^log\/T\d+_[^/]+\/(.+)$/.exec(rel);
+  if (!m) return null;
+  const inRoom = m[1];
+  if (inRoom === '검증기준.md' || inRoom.startsWith('검증요약/') || /^관찰\/B[^/]*\//.test(inRoom)) return 'B';
+  if (inRoom === '설계명세.md' || inRoom.startsWith('구현요약/') || /^관찰\/A[^/]*\//.test(inRoom)) return 'A';
+  if (inRoom.startsWith('배정/') || inRoom.startsWith('호출/')) return 'Z';
+  return null;
+}
+
+const isMode1 = (t) => String(t?.['모드'] ?? '').includes('1');
+const isActive = (t) => !['완료', '중단'].includes(t?.['상태']);
+
+// In mode 1 a person opens A and B as ordinary sessions, which are
+// indistinguishable from Z here, so those Tasks are left alone.
+function mode1Applies(rel, manifest) {
+  const tasks = manifest?.tasks ?? {};
+  const id = /^log\/(T\d+)_/.exec(rel)?.[1];
+  if (id) return isMode1(tasks[id]);
+  return Object.values(tasks).some((t) => isActive(t) && isMode1(t));
+}
+
+function hasActiveMode2(rel, manifest) {
+  const tasks = manifest?.tasks ?? {};
+  const id = /^log\/(T\d+)_/.exec(rel)?.[1];
+  const pool = id ? [tasks[id]].filter(Boolean) : Object.values(tasks);
+  return pool.some((t) => isActive(t) && !isMode1(t));
+}
+
+// → null (say nothing) | { action: 'deny', reason } | { action: 'log' }
+export function decideWrite({ role, rel, manifest }) {
+  const owner = classify(rel);
+  if (!owner || owner === role) return null;
+  const deny = (reason) => ({ action: 'deny', reason });
+
+  if (owner === 'B') {
+    if ((role === 'Z' || role === 'other') && mode1Applies(rel, manifest)) return null;
+    return deny(`zab: ${rel} 은 검증자(B)의 파일이다. 기준과 판정은 B만 쓴다 — 고칠 것이 있으면 사용자에게 알리고 새 B 호출로 개정한다.`);
+  }
+  if (owner === 'Z') {
+    if (role === 'A' || role === 'B') {
+      return deny(`zab: ${rel} 은 오케스트레이터(Z)의 파일이다. 장부·공용 로그·배정·호출은 Z만 쓴다 — 남길 것은 자기 요약 파일에 적는다.`);
+    }
+    return null;
+  }
+  // owner === 'A'
+  if (role === 'B') {
+    return deny(`zab: ${rel} 은 구현자(A)의 파일이다. 검증자는 산출물을 고치지 않는다 — 무엇을 어떻게 고쳐야 하는지 보고서에 적는다.`);
+  }
+  if (role === 'Z' && hasActiveMode2(rel, manifest)) return { action: 'log' };
+  return null;
+}
+
+// Walk up from the file to the folder that holds this plugin's ledger.
+function projectOf(file) {
+  let dir = path.dirname(path.resolve(file));
+  for (;;) {
+    const m = readManifest(dir);
+    if (m?._meta?.pipeline_repo === `plugin:${PLUGIN}`) return { dir, manifest: m };
+    const up = path.dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+export const DIRECT_LOG = 'log/직접수정.jsonl';
+
+export function own(event, now = new Date()) {
+  const input = event?.tool_input ?? {};
+  const file = input.file_path ?? input.notebook_path;
+  if (typeof file !== 'string' || !file) return null;
+  const abs = process.platform === 'win32' ? file.replace(/^\/([a-zA-Z])\//, '$1:/') : file;
+  const project = projectOf(abs);
+  if (!project) return null;
+  const rel = rel_(project.dir, abs);
+  const decision = decideWrite({ role: roleOf(event.agent_type), rel, manifest: project.manifest });
+  if (!decision) return null;
+  if (decision.action === 'log') {
+    const active = Object.entries(project.manifest.tasks ?? {})
+      .filter(([, t]) => isActive(t))
+      .map(([id, t]) => `${id} ${t['현재_단계'] ?? ''}`.trim());
+    const line = JSON.stringify({ 시각: now.toISOString(), 파일: rel, 도구: event.tool_name, 진행중: active });
+    fs.appendFileSync(path.join(project.dir, DIRECT_LOG), line + '\n');
+    return null;
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: decision.reason,
+    },
+  };
+}
+
+const rel_ = (base, p) => path.relative(base, path.resolve(p)).split(path.sep).join('/');
+
+export function directEdits(projectDir) {
+  try {
+    return fs
+      .readFileSync(path.join(projectDir, DIRECT_LOG), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
 }
 
 function main() {
@@ -225,6 +359,14 @@ function main() {
     } catch {}
     return;
   }
+  if (mode === 'own') {
+    // Fail open: a bug here must not stop anyone writing a file.
+    try {
+      const out = own(JSON.parse(fs.readFileSync(0, 'utf8')));
+      if (out) process.stdout.write(JSON.stringify(out));
+    } catch {}
+    return;
+  }
   if (mode === 'setup') {
     const { created, kept } = setup(cwd);
     console.log(`프로젝트 루트 = ${cwd}`);
@@ -236,7 +378,7 @@ function main() {
     console.log(where(cwd));
     return;
   }
-  console.error('usage: ung.mjs setup | where | banner');
+  console.error('usage: zab.mjs setup | where | banner');
   process.exitCode = 1;
 }
 
