@@ -1,32 +1,25 @@
 ---
-description: Show the design — what the interview settled, the criterion a separate agent set for each requirement, and the assumptions you would be approving.
+description: Z로 시작해 사용자와 사양을 정하고, 검증 기준(필요하면 설계 명세)을 사용자 승인까지 진행한다.
+argument-hint: "[파이프라인 이름]"
 allowed-tools: Bash(node:*)
 ---
 
-## The design
+## 현재 위치
 
-!`node "${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs" brief`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs" where`
 
 ---
 
-The block above is rendered from `SPEC.md` and `CRITERIA.md` by the hook, not
-written by a model, so it cannot drift from the documents the approval binds to.
-**Show it to the human as it is.** Do not summarise it, do not shorten it, do not
-reorder it — a summary of the summary is how the thing nobody read gets approved
-anyway.
+사용자 입력: $ARGUMENTS
 
-The requirement and the `judged` line under it were written by two different
-agents, and reading them as a pair is the whole exercise: the question is not "is
-this a good requirement" but **"would that test actually settle it?"**
+당신은 지금부터 **Z(오케스트레이터)** 다. 위 블록의 경로는 플러그인이 직접 찍은 값이므로 그대로 쓴다.
 
-Add nothing except, at most, one line after it:
+장부가 없다고 나왔으면 `/ung:setup` 을 안내하고 끝낸다.
 
-- if `/il:approve` has not happened yet: what the next action is
-- if a `✗` line appears: that the gate will refuse this until it is fixed
-- if it says there is no `CRITERIA.md` yet: that `il-criteria` has not run, and
-  the gate will refuse until it has
-- if the brief says there are no `DEC-###` entries and an interview did happen:
-  that the decisions were never written down, and offer to record them now
+1. `P/z/부팅.md` 를 끝까지 읽는다. 이어서 `P/z/플러그인운용.md` 를 읽는다 — 경로 해석과 이 명령의 범위가 거기 있다.
+2. 부팅문의 시작 흐름대로 진행한다. 사용자 입력에 파이프라인 이름이 있으면 그것을 고른 것으로 보고, 없으면 위 목록을 보여 고르게 한다.
+3. **이 명령의 범위는 "만들기 직전"까지다.** 고른 정의의 단계표에서 산출물 제작 단계 바로 앞의 ★까지 진행한다. 범용 정의라면 협의 → ★ 사양 확정 → B1 기준 작성 → ★ 기준 승인 → (설계 게이트 선언 시) A1 설계 → ★ 설계 승인이다.
+4. ★에서는 반드시 멈춘다. 사용자가 열어 볼 **파일 경로**를 알리고, 내용을 요약해 대신 말하지 않는다. 승인·수정요청·보류와 사용자의 말 원문을 장부에 남긴다.
+5. 범위의 마지막 ★가 승인되면 장부·실행로그를 갱신하고, 다음은 `/ung:build` 라고 알린 뒤 끝낸다. 제작 단계를 이어서 시작하지 않는다.
 
-Do not treat questions about the design as approval. Only the human's literal
-`/il:approve` keystrokes open the gate.
+Z는 만들지 않고 판정하지 않는다. A·B는 `P/z/상호작용규칙.md` 를 읽은 뒤에 호출한다.

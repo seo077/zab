@@ -1,5 +1,5 @@
 {
-  "description": "interlocking — spec gate, session resume, independent verification",
+  "description": "ung — Task board banner at session start, and read access to the plugin's own documents. Nothing is blocked.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,57 +8,21 @@
           {
             "type": "command",
             "timeout": 15,
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" session-start || true",
-            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" session-start }"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "timeout": 10,
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" prompt || true",
-            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" prompt }"
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs\" banner || true",
+            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs\" banner }"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|apply_patch",
+        "matcher": "Read|Grep|Glob",
         "hooks": [
           {
             "type": "command",
             "timeout": 10,
-            "statusMessage": "il gate",
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" pre-write || true",
-            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" pre-write }"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "timeout": 10,
-            "statusMessage": "il gate",
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" pre-bash || true",
-            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" pre-bash }"
-          }
-        ]
-      },
-      {
-        "matcher": "^mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "timeout": 10,
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" pre-mcp || true",
-            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs\" pre-mcp }"
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs\" allow-read || true",
+            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"${CLAUDE_PLUGIN_ROOT}/scripts/ung.mjs\" allow-read }"
           }
         ]
       }

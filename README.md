@@ -1,307 +1,102 @@
-<!-- Korean: README.ko.md -->
+# ung
 
-# interlocking
+**Claude Code용 Z·A·B 협업 파이프라인.** 사람이 결정하고, 오케스트레이터(Z)가 배치·중계·기록하고, 구현자(A)가 만들고, 만든 과정을 보지 못한 검증자(B)가 판정한다.
 
-**A plugin for Claude Code and Codex that makes the planning gate real.**
-
-An *interlocking* is the railway device that makes conflicting routes physically
-impossible to set. This is the same idea for AI coding sessions: until a human has
-approved the spec, the agent cannot edit source — and it cannot approve the spec
-itself, however it is asked.
-
-**Claude Code**
+*A human-in-the-loop pipeline for Claude Code: an orchestrator that never builds or judges, a builder, and a verifier that never saw the build. The method is written in Korean; an English summary is [below](#in-english).*
 
 ```
-/plugin marketplace add seo077/interlocking
-/plugin install il@interlocking
+/ung:setup    프로젝트 폴더 준비 — input · output · log · pipeline
+/ung:design   Z와 사양을 정하고, B가 검증 기준을 쓰고, 사람이 승인한다
+/ung:build    A가 만들고, 새 세션의 B가 판정하고, 사람이 최종 수락한다
 ```
 
-**Codex** — then open the TUI once and accept the hook trust prompt (`/hooks`).
-Until you do, Codex skips the hooks without saying so and nothing is gated;
-`$il-console doctor` will tell you which state you are in.
+## 설치
+
+Claude Code에서:
 
 ```
-codex plugin marketplace add https://github.com/seo077/interlocking
-codex plugin add il@interlocking
+/plugin install ung --marketplace seo077/ung
 ```
 
+Node 18 이상이 필요하다. 그 밖의 의존성은 없다.
 
-<p align="center">
-  <img src="docs/demo.svg" alt="A terminal replay: the gate refusing a write, two forgery attempts failing, a human approving, and an independent verifier refusing to trust the project&apos;s own notes" width="880">
-</p>
+## 어떻게 도나
 
-<sub>Real output from the run written up in <a href="docs/design/WALKTHROUGH.ko.md">WALKTHROUGH.ko.md</a> (Korean). Regenerate with <code>node tools/make-demo.mjs &gt; docs/demo.svg</code>.</sub>
+```
+/ung:design                                    /ung:build
+┌──────────────────────────────────────┐      ┌───────────────────────────────────────────┐
+ 협의 → ★사양 확정 → B 기준 작성 → ★기준 승인  →  A 구현 → ★구현 확인 → B 판정 → ★최종 수락
+                    (→ A 설계 → ★설계 승인)              (조건부·미달이면 A 재작업 → B 재검증)
+```
 
----
+★는 사람이 확인하는 자리다. 거기서 Z는 멈추고, 열어 볼 **파일 경로**를 알려 준다. 내용을 요약해 대신 말하지 않는다.
 
-## Why another one of these?
+지키는 선은 넷이다.
 
-[spec-kit][spec-kit] and [BMAD][bmad] already describe good spec-driven workflows,
-and both are worth using. But they are **documents and commands**: the agent is
-asked to follow them, and an agent under pressure to be helpful will decide that
-this particular case is fine to skip. spec-kit is agent-agnostic by design, which
-rules out hooks entirely.
+1. **기준이 먼저다.** 무엇을 보면 됐다고 할지를 만들기 전에 B가 쓰고, 사람이 승인한다.
+2. **판정은 검증자만 한다.** B는 A와 다른 새 세션이고, 재검증은 직전 검증과도 다른 새 세션이다. Z는 B의 판정을 옮길 뿐 요약하지 않는다.
+3. **A에게는 넉넉히, B에게는 아껴서.** A는 배경과 결정 원문을 다 받는다. B가 받는 것은 대상 경로와 승인 여부 정도다. 미리 들은 것으로 판단하면 독립 검증이 아니기 때문이다.
+4. **한 파일에는 주인이 하나다.** 장부와 공용 로그는 Z만, 산출물은 A만, 기준과 판정은 B만 쓴다.
 
-interlocking is not another methodology. It is the **enforcement layer**:
+## 작업 종류 — 파이프라인과 갈래
 
-| | |
+`/ung:design` 을 실행하면 Z가 쓸 수 있는 파이프라인 목록을 보여 준다.
+
+| 파이프라인 | 무엇 |
 |---|---|
-| **The gate blocks** | Until a human approves `SPEC.md`, source edits are denied — by a `PreToolUse` hook, not by a paragraph asking nicely. Markdown, docs and `.interlocking/**` stay writable, so planning is never blocked. |
-| **The agent cannot self-approve** | Approval is recorded by a hook reading the human's literal keystrokes, into a signed record **outside the repo**. Editing `gates_passed` in `STATE.md` does not open anything — it prints a tamper warning at every session start. |
-| **Nobody grades their own homework** | The session that writes a requirement does not write the criterion it will be judged by. `il-criteria` writes those, before any code exists, into a file the spec's author cannot touch — and the approval binds to it, so the yardstick cannot move afterwards either. On a failing round, shortening the ruler is the cheapest fix available; this is what takes it off the table. |
-| **What you approve is what you read** | Before the gate is asked to open, the design is rendered by the hook — decisions, every requirement paired with the criterion set for it, the assumptions riding along — and ruled on cold by a critic that was not in the interview and cannot edit either document. Its `NOT YET` refuses the approval; a human can overrule it, on the record. |
-| **Sessions resume** | Kill the session at any point. The next one starts with the resume anchor, the next action, and an explicit question about uncommitted work — which it will not answer for you. |
-| **Verification is independent** | A verifier subagent that never saw the implementation conversation judges each requirement against its own acceptance criteria. It can read and run; it cannot write source, enforced by a hook rather than by its own config. |
+| 범용 | 맞는 정의가 없는 일회성·탐색 작업의 기본 골격. 코드 작업도 여기서 시작한다 |
+| 회로분석 | 회로도를 모듈별로 읽어 분석하고 오류·위험·개선점을 진단한다 |
+| 엑셀작업 | 엑셀 작업을 레이아웃 → 출력 두 단계로, 원본을 고치지 않고 해낸다 |
+| 파이프라인신설 | 새 종류의 작업을 위한 파이프라인 한 벌을 만든다 |
 
-[spec-kit]: https://github.com/github/spec-kit
-[bmad]: https://github.com/bmad-code-org/BMAD-METHOD
+작업 종류마다 달라지는 지식은 **갈래**로 붙는다. A는 `a/갈래별/<갈래>/` 의 규칙·참고자료·skills를, B는 `b/갈래별/<갈래>/` 의 검증 기준을 읽는다. 되풀이할 새 작업이 생기면 **파이프라인신설**을 한 판 돌려 정의와 갈래 한 벌을 만든다.
 
----
+## 무엇이 어디에 있나
 
-## What a feature looks like
+역할 문서·정의·갈래는 **플러그인 안에 한 벌만** 있다. 프로젝트에 복사하지 않는다.
 
 ```
-/il:new user login
-
-  [il] Size: feature (4 REQs, ~8 tasks)
-       Researching… interviewing (3 questions)… threat model…
-       Wrote .interlocking/work/001-login/SPEC.md   ← requirements, no criteria
-
-  [il] il-criteria wrote the yardstick. It did not write the spec, it will not
-       write the code, and there is no code yet to write one around.
-       Wrote .interlocking/work/001-login/CRITERIA.md   ← 4 criteria, 1 unjudgeable
-
-  [il] The design, before you are asked to approve it — /il:design
-
-    DECIDED WITH YOU (3)
-      DEC-002  Sessions live on the server, not in a signed cookie.
-               asked   Server sessions or a stateless JWT?
-               you     Server. I want to be able to revoke one.
-               lands   REQ-002, REQ-004
-    BUILDING (4) — and how each is judged
-      REQ-002  A session expires after 30 minutes of inactivity.
-               judged  a request 31 minutes after the previous one returns 401
-               how     run `npm test -- session-expiry`
-      REQ-004  Login is fast enough under load.
-               judged  NOTHING — no number in the requirement, so nothing to test
-    ASSUMPTIONS (3) — 1 UNCONFIRMED
-      ⚠ ASM-003  Single region. (user: declined to answer)
-
-  [il] Read cold by il-spec-critic, which was not in the interview and saw the
-       two documents side by side for the first time:
-    REQ-004  "fast enough" has no number, so no verifier can rule on it
-    VERDICT: NOT YET — REQ-004 is the blocker
-
-> /il:approve
-  [il] G0 refused for 001-login — il-spec-critic returned NOT YET (1 blocker).
-       Read it:   .interlocking/work/001-login/REVIEW.md
-       Overrule:  /il:approve despite-review
-
-> the agent tries to get ahead of itself
-  ⏺ Write(src/auth/session.ts)
-  ⎿  ✗ [il] G0 not approved for 001-login — cannot write src/auth/session.ts
-        Ask the human to review it and type:  /il:approve
-        Urgent? the human can type:           /il:override <reason>
-        Markdown, docs and .interlocking/** are never blocked — keep planning.
-
-> the human puts a number on REQ-004, il-criteria runs again, the critic clears it
-
-> /il:approve
-  [il] G0 approved — 001-login (spec 4f2a9c1e, criteria 9b1d0c33). Code edits unlocked.
-
-/il:next     one task, one subagent, one commit
-/il:verify   an independent verifier judges each REQ against CRITERIA.md — which
-             neither it nor the implementer wrote — and writes VERIFY.md itself
+플러그인                          프로젝트 (/ung:setup 이 만든다)
+├─ pipeline/                      ├─ CLAUDE.md · 프로젝트지도.md
+│  ├─ z/  부팅 · 상호작용규칙       ├─ input/     재료
+│  │      · pipelines/<작업>.md    ├─ output/    결과
+│  ├─ a/  부팅 · 공통규칙 · 갈래별/  ├─ pipeline/  이 프로젝트에서 만든 정의·갈래
+│  └─ b/  부팅 · 공통규칙           └─ log/
+│         · 검증기준_공통 · 갈래별/      ├─ manifest.json     Task 장부 (Z만)
+├─ templates/project/                 ├─ 실행로그.md · AI 논의사항.md
+├─ commands/  setup · design · build   └─ T{N}_<작업명>/    Task 방
+├─ agents/    a · b                          검증기준 · (설계명세) · 구현요약/ · 검증요약/
+└─ scripts/ung.mjs
 ```
 
-Then the laptop dies. The next session opens with:
+- 한 번 쓰는 **사실**은 프로젝트에, 되풀이하는 **방법**은 파이프라인에 둔다.
+- 플러그인의 `pipeline/` 은 읽기 전용이다. 프로젝트에서 새로 만든 정의·갈래는 프로젝트의 `pipeline/` 에 생기고, 되풀이가 확인되면 이 저장소에 Pull Request로 올린다. 방향은 프로젝트 → 파이프라인 한쪽뿐이다.
+- 파이프라인 한 판이 **Task 하나**(`T1`·`T2`…)다. 재작업은 새 Task가 아니라 Task 안의 반복 `R2`·`R3`이다.
+
+자세한 것은 [pipeline/README.md](pipeline/README.md)와 [pipeline/z/플러그인운용.md](pipeline/z/플러그인운용.md).
+
+## 이것이 하지 않는 일
+
+- **아무것도 막지 않는다.** 훅은 둘뿐이다 — 세션을 열 때 Task 상황판을 보여 주는 것, 그리고 플러그인 자신의 문서(`pipeline/` · `templates/`)를 권한 확인 없이 읽게 하는 것. 어느 쪽도 거절하지 않는다. 규칙은 문서이고, 지키는 것은 역할을 맡은 모델과 ★에서 직접 열어 보는 사람이다.
+- **빠르지 않다.** 기준을 먼저 쓰고, 사람이 여러 번 확인하고, 검증을 새 세션으로 돌린다. 틀려도 되돌리기 쉬운 일에는 과하다 — 그런 판에서는 Z가 검증 생략을 제안할 수 있고, 정하는 것은 사용자다.
+- **Codex는 아직이다.** 지금은 Claude Code만 지원한다.
+
+## 개발
 
 ```
-[il] 001-login · EXECUTE · G0 approved (spec 4f2a9c1e ✓ unchanged)
-NEXT: T-012 — session cookie in src/auth/session.ts (SPEC.md#REQ-007)
-
-[il] ACTION REQUIRED — resolve with the human before anything else:
-  3 file(s) have uncommitted changes: src/auth/session.ts, tests/test_session.ts…
-  Ask the human, and do not decide for them: (a) finish  (b) discard and restart  (c) show me the diff
+npm test                              # scripts/ung.mjs
+claude plugin validate .
+claude --plugin-dir .                 # 이 저장소를 플러그인으로 얹어 실행
 ```
 
----
+이 저장소의 예전 설계(훅으로 승인 전 편집을 차단하던 `interlocking`)는 태그 `interlocking-v0.1-final` 에 남아 있다.
 
-## Commands
+## In English
 
-| | |
-|---|---|
-| **`/il:help`** | **Start here.** Where you are, and the two or three commands that would do something right now |
-| `/il:new <goal>` | Size, research, interview, threat model, spec, ask for approval |
-| `/il:onboard` | Set an existing repo up. Existing code is never retro-gated. |
-| `/il:design` | The design as it stands: decisions, every REQ with its criterion, assumptions |
-| `/il:status` | Where things stand, in detail |
-| `/il:next` | Run the next ready task in a fresh subagent, commit it |
-| `/il:verify` | Independent acceptance verification |
-| `/il:doctor` | What this installation can actually enforce |
-| **`/il:approve`** | **Human only.** Open the gate. |
-| **`/il:override <reason>`** | **Human only.** Time-boxed, recorded bypass — the fast lane for trivial and localized low-risk work. |
-| **`/il:policy`** | **Human only.** Bless a widened `policy.json`. |
+ung packages a working method, not an enforcement layer. One session becomes **Z**, the orchestrator, which assigns work, relays results verbatim and keeps the ledger — and is forbidden to build or to judge. **A** builds. **B** writes the acceptance criteria *before* anything is built, and later a fresh B session, given little more than file paths, judges the result against the criteria the human approved. Every ★ in a pipeline definition is a point where the agents stop and a person opens the file themselves.
 
-The last three cannot be invoked by the model. They are handled by a hook that
-reads what you typed. Both forms work — `/il:approve` and plain `il approve` — and
-the second one is deliberate insurance: an *unregistered* slash command skips hooks
-entirely, so a plain sentence is the form that cannot be short-circuited.
+`/ung:setup` scaffolds a project folder, `/ung:design` runs up to the last approval before building, and `/ung:build` runs from there to final acceptance. Role documents live once, inside the plugin; a project holds only its materials, results and logs. Nothing is blocked by hooks — the rules are documents.
 
-### On Codex
+## License
 
-Codex has no plugin slash commands, so the same actions are spelled differently.
-The hook detects the host and prints the right spelling; this table is for when
-you want to type one yourself.
-
-| Claude Code | Codex |
-|---|---|
-| `/il:new <goal>` | `$il-spec` |
-| `/il:onboard` | `$il-onboard` |
-| `/il:next` | `$il-execute` |
-| `/il:verify` | `$il-verify` |
-| `/il:status` `/il:help` `/il:doctor` `/il:design` | `$il-console status` · `help` · `doctor` · `design` |
-| `/il:approve` | **`il approve`** |
-| `/il:override <reason>` | **`il override <reason>`** |
-| `/il:policy` | **`il policy`** |
-
-The three human-only directives are the ones worth committing to memory. They are
-plain text on both hosts, they were always accepted without the slash, and no
-skill or command sits between your keystrokes and the hook that records them.
-
----
-
-## What it does not do
-
-This is the part most tools leave out.
-
-**interlocking makes it hard to slide from planning into implementing by accident,
-and makes every deliberate bypass loud and recorded. It is not a sandbox.** A model
-that decides to route around the gate can. The design goal is that you find out.
-
-| Vector | v0.1 |
-|---|---|
-| `Edit` / `Write` / `MultiEdit` / `NotebookEdit` (Claude Code) | ✅ blocked |
-| `apply_patch` (Codex — its only write tool) | ✅ blocked, envelope parsed for every target |
-| Redirects `> f`, `>> f`, `tee`, heredocs, fd prefixes | ✅ |
-| In-place editors `sed -i`, `perl -i` | ✅ |
-| Patch appliers `git apply`, `patch`, `git checkout -- `, `git stash pop`, `git reset --hard` | ✅ denied while gated |
-| Inline interpreters `python -c`, `node -e`, `ruby -e`, `php -r` | ✅ denied while gated |
-| Scaffolders `npm init`, `npx create-*`, `cargo new`, `go mod init` | ✅ denied while gated |
-| `cp` / `mv` / `install` / `ln` into a source path | ✅ |
-| Nested `claude -p` / `codex exec` | ✅ denied while gated |
-| Tool calls **inside subagents** | ✅ hooks fire there too |
-| Untrusted hooks on Codex | ⚠️ **skipped silently until you accept the trust prompt once** — run `$il-console doctor` |
-| Agent identity on Codex | ⚠️ not attested by the host, so the three judgement files are a convention there, not a lock — see below |
-| Redirect targets built at runtime (`> $OUT`) | ✅ denied — unresolvable, so not waved through |
-| `eval "$(… \| base64 -d)"`, `awk 'BEGIN{print > "f"}'`, variable-built paths | ❌ **not caught** |
-| MCP filesystem servers | ⚠️ partial — tool names matching `write\|edit\|create\|patch\|…` only |
-| You, in your own editor | ❌ out of scope by design |
-
-The full corpus is [`test/fixtures/bash-writes.txt`][corpus] — 110 real bypass
-attempts, each one a test.
-
-> **Found one we miss? Add a line to that file and open a PR.** It is the single
-> highest-value contribution here: a fix without a corpus entry regresses silently.
-
-[corpus]: test/fixtures/bash-writes.txt
-
-### How independent is "independent"?
-
-| | v0.1 |
-|---|---|
-| Context — never sees the implementation conversation | ✅ |
-| Permissions — cannot write source, enforced by hook | ✅ |
-| Input — fixed template, no free-text slot for the caller | ✅ |
-| Judgement — SPEC is the only source of requirements | ✅ |
-| **Identity — attested by the host, not claimed by the agent** | ✅ Claude Code · ❌ Codex |
-| **Model — same model as the implementer** | ❌ |
-
-**On Codex the identity row is the one that changes.** Claude Code stamps
-`agent_type` onto every tool call itself, which is what makes "only `il-verifier`
-may write `VERIFY.md`" a rule rather than a request. Codex does not send it, and
-its `spawn_agent` takes the agent type as an argument the *model* supplies — so
-there is nothing to check. Building a fixed packet instead arms a signed,
-30-minute, use-budgeted write to its judgement file (a budget rather than exactly
-one: the hook runs before the tool does and cannot learn whether a write
-succeeded, and replacing a file is a delete plus an add). `/il:doctor` describes this as
-a capability convention rather than identity proof. The G0 gate does not depend
-on this.
-
-**The same model makes the same mistakes.** If Claude misremembers an API, the
-implementer and the verifier misremember it identically. By [NASA IV&V][ivv]
-standards this is partial *technical* independence and nothing more. Cross-model
-verification (`--cross`) is planned; the packet is already a file so that it can be
-handed to another tool unchanged.
-
-[ivv]: https://swehb.nasa.gov/display/SWEHBVC/SWE-141+-+Software+Independent+Verification+and+Validation
-
-### Validation vs verification
-
-| | Question | Judged by | Here |
-|---|---|---|---|
-| **Validation** | Did we build the right thing? | a human, always | **G0 approval** |
-| **Verification** | Did we build it to spec? | can be automated | **`/il:verify`** |
-
-G0 *is* the validation step — the interview, the assumption ledger, the
-build/don't-build summary. Post-hoc validation (does it hold up in use?) is not in
-v0.1; that is G3.
-
-### Cost
-
-Roughly **110 ms per gated tool call on Windows, ~80 ms of which is bare Node
-startup**; about half that on Linux and macOS. `Read`, `Grep` and `Glob` are
-deliberately not hooked. `IL_DISABLE=1` turns everything off.
-
-In a repo without `.interlocking/`, the hook is one `existsSync` and then gone.
-
----
-
-## Disclaimer
-
-> interlocking enforces a *process*. It does not verify that your code is correct,
-> secure, or fit for purpose. Gates can be overridden, and the G0 edit block is a
-> guardrail against accidental drift — **not a security boundary**. Do not rely on
-> it as one.
-
-No telemetry. Nothing leaves your machine. The harness reads your project's
-documents, so that has to be true for it to be worth installing.
-
----
-
-## Layout
-
-```
-your-repo/
-├── src/                    ← your code. The harness never moves it.
-├── CLAUDE.md
-└── .interlocking/          ← committed, so work resumes on another machine
-    ├── policy.json         what counts as code here, and what may bypass
-    ├── CONTEXT.md          principles, stack, glossary, roadmap
-    ├── DECISIONS/          ADRs: what was chosen, and what was rejected and why
-    ├── work/001-login/     SPEC · PLAN · TASKS · STATE · VERIFY
-    └── archive/            completed features
-```
-
-The plugin itself carries two manifests, because the two hosts look in different
-places: `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`. Both point
-at the same `hooks/il.mjs` and the same `hooks/hooks.json`.
-
-The approval store lives **outside** the repo — `~/.interlocking/`, or wherever
-`IL_HOME` points. That is the point: a gate recorded in a file the model can write
-is not a gate. It is deliberately *not* `CLAUDE_PLUGIN_DATA`, which both hosts set
-for hook processes and neither sets for anything else; a store that moves with the
-calling context once had `/il:status` and the gate itself reporting opposite
-answers on the same project in the same second.
-
----
-
-## Docs
-
-- [Korean README](README.ko.md)
-- [Security model and reporting](SECURITY.md)
-- [Contributing](CONTRIBUTING.md) — start with the bypass corpus
-- [Measured platform behaviour](docs/design/platform-facts.md) — what was verified against the real binary, and what was not
-- [Design notes (Korean)](docs/design/concept.ko.md)
-
-MIT. Requires Node 18+ and either Claude Code or Codex CLI (measured on 0.149.0).
+MIT

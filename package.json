@@ -1,19 +1,16 @@
 {
-  "name": "interlocking",
+  "name": "ung",
   "version": "0.1.0",
   "private": true,
-  "description": "Repo tooling for the `il` plugin (Claude Code and Codex). The plugin itself ships no dependencies and does not require npm to run.",
+  "description": "Repo tooling for the ung plugin. The plugin itself ships no dependencies and does not require npm to run.",
   "license": "MIT",
+  "type": "module",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/run.mjs",
-    "validate": "claude plugin validate . --strict",
-    "validate:codex": "node tools/validate-codex.mjs",
-    "install:codex": "codex plugin marketplace add . && codex plugin add il@interlocking",
-    "check": "npm run validate && npm test",
-    "test:node18": "npx -y node@18.20.8 test/run.mjs",
-    "test:node20": "npx -y node@20.19.0 test/run.mjs"
+    "test": "node test/ung.test.mjs",
+    "validate": "claude plugin validate .",
+    "check": "npm run validate && npm test"
   }
 }

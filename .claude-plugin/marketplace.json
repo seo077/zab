@@ -1,16 +1,16 @@
 {
-  "name": "interlocking",
-  "description": "Interlocking — a hook-enforced development harness for Claude Code.",
+  "name": "ung",
+  "description": "ung — a Z·A·B collaboration pipeline for Claude Code.",
   "owner": {
     "name": "seo077"
   },
   "plugins": [
     {
-      "name": "il",
+      "name": "ung",
       "source": "./",
-      "description": "A hook-enforced development harness for Claude Code: spec approval gates that actually block, 30-second session resume, and verification that never saw the implementation.",
+      "description": "Z·A·B 협업 파이프라인: /ung:setup → /ung:design → /ung:build. 기준을 먼저 쓰고, 사람이 승인하고, 만든 과정을 보지 못한 검증자가 판정한다.",
       "category": "workflow",
-      "tags": ["spec-driven", "gates", "verification", "resume"]
+      "tags": ["pipeline", "orchestrator", "verification", "human-in-the-loop"]
     }
   ]
 }

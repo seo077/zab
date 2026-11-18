@@ -14,6 +14,3 @@ scratch/
 .env.*
 !.env.example
 !.env.template
-
-# NOTE: .interlocking/ is intentionally NOT ignored.
-# Harness artifacts are committed so work can resume on another machine (D-007).
