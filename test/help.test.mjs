@@ -130,3 +130,62 @@ test('the header names the feature once — gate.why already carries it', () => 
   const header = out.split('\n')[0];
   assert.equal(header, '[il] 001-login · G0 not approved');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// a closed gate after an amendment is not the same as a closed gate before one
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('an amendment says how much moved and points at the cheap path', () => {
+  const out = composeHelp({
+    feature: '001-login',
+    gate: { open: false, why: 'SPEC.md changed since G0 was approved for 001-login', feature: '001-login' },
+    state: { data: { gates_passed: [] }, body: '' },
+    amendment: { moved: 1, carried: 16 },
+  });
+  assert.match(out, /1 requirement\(s\) moved, 16 carry forward/);
+  assert.match(out, /\/il:delta/);
+});
+
+test('no amendment, no extra line - the screen stays narrow', () => {
+  const out = composeHelp({
+    feature: '001-login',
+    gate: { open: false, why: 'G0 not approved for 001-login', feature: '001-login' },
+    state: { data: { gates_passed: [] }, body: '' },
+  });
+  assert.doesNotMatch(out, /carry forward/);
+  assert.ok(offered(out).length <= HELP_MAX_COMMANDS);
+});
+
+test('the amendment line never displaces a command or a tamper warning', () => {
+  const out = composeHelp({
+    feature: '001-login',
+    gate: { open: false, why: 'SPEC.md changed since G0 was approved for 001-login', feature: '001-login' },
+    state: { data: { gates_passed: ['G0'] }, body: '' },
+    amendment: { moved: 2, carried: 15 },
+  });
+  assert.ok(offered(out).length <= HELP_MAX_COMMANDS, 'still at most three commands');
+  const tamper = out.indexOf('STATE.md claims G0');
+  const amend = out.indexOf('carry forward');
+  assert.ok(tamper !== -1 && tamper < amend, 'the mirror mismatch still leads');
+  // The mirror warning already names the command. Printing it twice on a screen
+  // whose entire contract is "at most three things to do" is how that erodes.
+  assert.equal(out.split('/il:delta').length - 1, 1, 'the command appears once');
+});
+
+test('a stale mirror names the document that moved, not just that something did', () => {
+  const out = composeHelp({
+    feature: '001-login',
+    gate: { open: false, why: 'CRITERIA.md changed since G0 was approved for 001-login', feature: '001-login' },
+    state: { data: { gates_passed: ['G0'] }, body: '' },
+  });
+  assert.match(out, /CRITERIA\.md changed/);
+  assert.match(out, /yardstick/i);
+});
+
+test('composeHelp still never throws on a malformed amendment', () => {
+  for (const bad of [42, 'x', {}, { moved: null }, []]) {
+    assert.doesNotThrow(() =>
+      composeHelp({ feature: 'f', gate: SHUT, state: { data: {}, body: '' }, amendment: bad })
+    );
+  }
+});

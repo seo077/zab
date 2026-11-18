@@ -221,8 +221,10 @@ attempts, each one a test.
 `agent_type` onto every tool call itself, which is what makes "only `il-verifier`
 may write `VERIFY.md`" a rule rather than a request. Codex does not send it, and
 its `spawn_agent` takes the agent type as an argument the *model* supplies — so
-there is nothing to check. Building a fixed packet instead arms one signed,
-10-minute, single-use write to its judgement file. `/il:doctor` describes this as
+there is nothing to check. Building a fixed packet instead arms a signed,
+30-minute, use-budgeted write to its judgement file (a budget rather than exactly
+one: the hook runs before the tool does and cannot learn whether a write
+succeeded, and replacing a file is a delete plus an add). `/il:doctor` describes this as
 a capability convention rather than identity proof. The G0 gate does not depend
 on this.
 

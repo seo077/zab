@@ -1,0 +1,8 @@
+{
+  "policyCommands": [
+    ".\\.tools\\godot-4.7.2\\Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/regression_runner.gd -- --requirement *",
+    "node tests/web/run_browser_regression.mjs --base-url http://127.0.0.1:8060 --requirements REQ-012,REQ-013",
+    "$env:IL_GH_PATH='C:\\Program Files\\GitHub CLI\\gh.exe'; node tests/web/verify_preserved_deployment.mjs --requirements REQ-014"
+  ],
+  "criteria": "REQ-012\n  Judged: browser evidence matches the approved oracle.\n  Method: First run the exact standard command: `node tests/web/run_browser_regression.mjs --requirements REQ-012`. After it succeeds, separately run `node tests/web/run_browser_regression.mjs --negative-oracle-self-test coordinated-runtime-harness-corruption`.\n\nREQ-014\n  Judged: deployed evidence is independently authenticated.\n  Method: Normally run `node tests/web/run_browser_regression.mjs --requirements REQ-014`. Only after recording policy denial, set `IL_SIGSTORE_TRUSTED_ROOT`, then run `node tests/web/verify_preserved_deployment.mjs --requirements REQ-014`.\n\nREQ-017\n  Judged: the delivered lifecycle is preserved.\n  Method: Normally run `node tests/web/run_browser_regression.mjs --requirements REQ-017`, then inspect its JSON evidence."
+}

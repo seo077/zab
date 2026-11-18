@@ -1,6 +1,6 @@
 {
   "name": "il",
-  "version": "0.1.0+codex.20260825150424",
+  "version": "0.1.0+codex.20260827124409",
   "description": "A hook-enforced development harness for Codex: spec approval gates that actually block, 30-second session resume, and verification that never saw the implementation.",
   "author": {
     "name": "seo077"

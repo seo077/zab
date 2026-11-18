@@ -15,7 +15,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, exist
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseIlDirective, signToken, specHash } from '../hooks/il.mjs';
+import { parseIlDirective, signToken, verifyToken, specHash } from '../hooks/il.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'il.mjs');
 
@@ -462,4 +462,42 @@ test('a refused approval is auditable, so a shut gate can be explained later', (
   )[0];
   assert.match(log, /approve-refused/);
   assert.match(log, /no-threat-model/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// what a signature actually covers
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('the signature covers nested fields, not just the top level', () => {
+  // The first version of canonical() used JSON.stringify's replacer argument,
+  // which looks like it sorts keys and does that too - but an array replacer is
+  // an allowlist applied at EVERY depth, so `{a: {x: 1}}` signed as `{"a":{}}`.
+  // Nothing caught it while every field in every token was a scalar. It became
+  // exploitable the moment one held a per-requirement hash map: the baseline the
+  // scoped-amendment path trusts would have been freely editable inside a record
+  // that still verified.
+  const key = Buffer.alloc(32, 3);
+  const a = { v: 1, feature: 'x', req_digest: { 'REQ-001': 'aaaa' } };
+  const b = { v: 1, feature: 'x', req_digest: { 'REQ-001': 'bbbb' } };
+  assert.notEqual(signToken(key, a), signToken(key, b), 'a nested edit must break the signature');
+
+  a.sig = signToken(key, a);
+  assert.equal(verifyToken(key, a), true);
+  const tampered = { ...a, req_digest: { 'REQ-001': 'bbbb' } };
+  assert.equal(verifyToken(key, tampered), false);
+});
+
+test('the signature covers array contents too', () => {
+  const key = Buffer.alloc(32, 3);
+  const a = { v: 1, carried_reqs: ['REQ-001', 'REQ-002'] };
+  const b = { v: 1, carried_reqs: ['REQ-001', 'REQ-003'] };
+  assert.notEqual(signToken(key, a), signToken(key, b));
+});
+
+test('key order still does not matter, at any depth', () => {
+  const key = Buffer.alloc(32, 3);
+  assert.equal(
+    signToken(key, { a: 1, n: { x: 1, y: 2 } }),
+    signToken(key, { n: { y: 2, x: 1 }, a: 1 })
+  );
 });

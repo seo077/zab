@@ -9,23 +9,126 @@ carries its own `version`, and Codex serves the cached build until that string m
 
 ## [Unreleased]
 
-### Changed
-
-- Make assurance proportional: trivial and localized low-risk small changes use
-  a recorded override plus one targeted check, without miniature SPEC/critic/
-  subagent/independent-verifier ceremony.
-- Bound verification to affected requirements and classify unavailable network,
-  browser, credentials, tools, or sandbox access as environmental INCONCLUSIVE;
-  these no longer justify repeated agents or product-SPEC amendments by default.
-
 ### Fixed
 
-- Codex help no longer points to the nonexistent `$il-console onboard` mode.
-  Existing repositories are initialized through the dedicated `$il-onboard`
-  skill, which creates the harness without starting a feature or retroactively
-  gating existing code.
+- **A judgement grant was spent by the delete half of a replace.** Replacing an
+  existing `VERIFY.md` is a delete and then an add; the single-use capability was
+  consumed by the delete and the add was refused, so a verifier that had reached a
+  verdict could not record it. A failed write burned it the same way, because
+  `PreToolUse` fires *before* the tool runs and can never learn whether it
+  succeeded — exactly-once is not available at that hook point, and pretending
+  otherwise cost a real run its verdict. The grant is now a small use budget
+  (4 calls) inside a 30-minute window, still bound to one feature, one artifact
+  and one owner, and still signed. Ten minutes was also wrong: a verifier ruling
+  on seventeen requirements runs the project's test suite first, and the
+  capability expired before it had an answer.
+
+- **A Codex agent could not write the file it was spawned to write.** The
+  owned-artifact rule matched the registry name `il-verifier`, and Codex canonical
+  task names cannot carry a hyphen — so the value that arrived was `verifier`, the
+  name check failed, and the grant fallback was skipped because it additionally
+  required the caller to be anonymous. Identity is now canonicalised
+  (`canonicalAgent()`), and on a host that does not attest identity the grant
+  alone authorises the write, which is what it was always for. This closes a hole
+  in the other direction too: an unrecognised near-miss name used to mean *no*
+  restriction, so a Codex task called `verifier` could write source that
+  `il-verifier` could not.
+
+- **The token signer did not sign nested fields.** `canonical()` used
+  `JSON.stringify`'s replacer argument, which looks like it sorts keys and does —
+  but an array replacer is an allowlist applied at *every* depth, so any nested
+  object serialised as `{}` and its contents were never covered. Invisible while
+  every field in every token was a scalar; live the moment one held a map. It is
+  now a hand-written deterministic serialiser. Flat tokens sign byte-identically,
+  so existing approvals keep verifying.
+
+- **HEAD moving is no longer treated as a hazard by default.** A commit is the
+  normal end of a task, so "HEAD is not the STATE.md anchor" was firing ACTION
+  REQUIRED at the human about the thing the harness had just told them to do —
+  and on a real run that is what stopped a finished feature from starting the next
+  one. `gitInfo()` now asks whether HEAD still *contains* the anchor: an advance
+  is a note, and only a rewind, a rebase, a different branch or an unresolvable
+  anchor is a question. Unknown ancestry fails toward the question.
+
+- **A stale `gates_passed` now says which of three things happened.** The warning
+  was identical whether the spec had been amended on purpose, the criteria had
+  moved, or the line had been written with no approval behind it — so it sent
+  people hunting for tampering after an edit they had just made deliberately. The
+  reason from the signed store is now printed, with advice that routes on it. The
+  rule itself is unchanged: the hook never rewrites `STATE.md`, because a harness
+  that silently repairs the record of its own gate destroys the only signal that
+  says someone edited it.
 
 ### Added
+
+- **`il delta` — scoped amendment after an approval.** Editing `SPEC.md` or
+  `CRITERIA.md` still closes G0, and the approval still binds both whole-document
+  hashes: none of that moves. What moves is how much work the two agents redo.
+  Previously a two-line amendment to *how* one requirement is verified sent every
+  requirement in the feature back through `il-criteria` and the critic — and
+  because each full re-review surfaced unrelated findings in requirements nobody
+  had touched, one verification-contract change cost four rounds and four
+  approvals on a real run.
+
+  Approvals now record a hash per requirement and per criterion. `il delta`
+  compares the current documents against that **signed** record — never against
+  anything in the repo — and reports what moved, what was added or removed, and
+  what is byte-identical to what the human already approved. `criteria-packet
+  --delta` and `review-packet --delta` scope the work to the answer.
+
+  The refusals are the load-bearing part. No prior approval, a record predating
+  per-requirement hashes, or a failed signature produces no scope at all: a reuse
+  claim the store cannot substantiate is worth nothing, least of all from the
+  session that would prefer less work. `il-criteria` carries the unchanged entries
+  through rather than re-deriving them, and altering one is *detected* rather than
+  trusted — it re-enters review on the next `delta`. The critic still reads both
+  documents whole; only its attention is directed, and its packet says in as many
+  words that a finding outside the scope is still a finding. The approval screen
+  names how many requirements moved and how many carried, so the assurance
+  difference is something the human reads rather than something the model decided.
+
+- **`il preflight` — can the verification round run at all?** Two full rounds on
+  one real run returned nothing but INCONCLUSIVE, and neither was about the code:
+  `policy.verify.commands` was empty, and a criterion named `godot4` when the
+  executable lived in the repository. Both were discovered *after* implementation
+  was finished and a fresh agent had read every requirement. Preflight answers the
+  same question in two seconds, before the packet is built, and `verify-packet`
+  runs it automatically. It is deliberately shallow — found or not found, never
+  "will it pass" — because a preflight that cries wolf is one people learn to skip.
+
+- **`BLOCKED`, distinct from `INCONCLUSIVE`.** Both mean "I did not decide" and
+  they are repaired by different people, so collapsing them routes the work to the
+  wrong place: on a real run a verifier with a denied network reported
+  INCONCLUSIVE, and the loop opened product tasks against code that was already
+  correct. BLOCKED is the environment — denied network, missing program, absent
+  device — and costs nothing to retry once fixed. INCONCLUSIVE means the evidence
+  the criterion asks for does not exist, which is a change to `CRITERIA.md` and
+  therefore a new approval. One test tells them apart: would this criterion pass
+  on the implementer's machine, exactly as written?
+
+- **`policy.artifacts`** — globs for files the harness and its verification
+  generate: packets, evidence, screenshots, exports. The resume question exists to
+  protect half-finished human work and only functions if it is rare; on a real run
+  generated evidence made every session open with ACTION REQUIRED about files the
+  harness had produced one command earlier. Declared artifacts become a note;
+  everything else stays a question. Nothing is guessed — an undeclared file is
+  human work, because guessing wrong here loses someone's work.
+
+- **A delivery-surface question at intake** (`il-spec` §1). When the thing that
+  runs the code and the thing the user touches are not the same — a browser, a
+  phone, a deployed URL, a packaged binary — the spec needs requirements about the
+  delivered artifact *before* the first G0: real input, rendered text, a whole
+  lifecycle, and provenance tying deployed bytes to a source commit. On the run
+  behind this rule a feature passed 11 of 11 requirements, was declared complete,
+  and was reopened by the user four times over mojibake, a dead drag and a turn
+  that never ended. Retrofitting those requirements costs an amendment; asking one
+  question at intake costs a line.
+
+- **`verified` and `accepted` are different states** (`il-verify`). A PASS means
+  every requirement was judged met against the criteria, in the environment the
+  verifier had. On a delivered surface that is not the same claim as "it works",
+  and reporting it as completion is what let one feature be declared done four
+  times. Report the verdict and what it did not cover, then let the human look.
 
 - **Codex is now a first-class host.** `codex plugin marketplace add` +
   `codex plugin add il@interlocking`, and the same gate blocks there. Measured on
@@ -142,6 +245,16 @@ carries its own `version`, and Codex serves the cached build until that string m
 
 ### Changed
 
+- Make assurance proportional: trivial and localized low-risk small changes use
+  a recorded override plus one targeted check, without miniature SPEC/critic/
+  subagent/independent-verifier ceremony.
+- Bound verification to affected requirements and classify unavailable network,
+  browser, credentials, tools, or sandbox access as environmental BLOCKED; these
+  no longer justify repeated agents or product-SPEC amendments by default.
+- Codex help no longer points to the nonexistent `$il-console onboard` mode.
+  Existing repositories are initialized through the dedicated `$il-onboard`
+  skill, which creates the harness without starting a feature or retroactively
+  gating existing code.
 - **Nested `codex exec` is denied while gated, the same as `claude -p`.** A nested
   session can submit its own user prompts, which is the one thing the approval path
   assumes cannot happen. Only `claude` was on that list.

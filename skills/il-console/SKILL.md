@@ -47,6 +47,13 @@ say so plainly rather than reporting a state you could not read.
 | `help` | `help` | what to do right now, wherever the feature is |
 | `doctor` | `doctor` | what this installation can actually enforce — read this one before trusting the rest |
 | `design` | `brief` | the design the human is being asked to approve, in full |
+| `delta` | `delta` | after an amendment: which requirements moved, and which carry forward from the last approval |
+| `preflight` | `preflight` | before verification: whether the programs the criteria name can actually be launched here |
+
+`preflight` is the cheapest report in this table and the one most worth running
+unprompted. A verification round that returns nothing but INCONCLUSIVE because a
+program is missing costs a fresh agent reading every requirement; this answers
+the same question in two seconds, before any of that.
 
 Three more exist for the judgement agents and are not for general use:
 `criteria-packet`, `review-packet`, `verify-packet`. Each prints the packet a

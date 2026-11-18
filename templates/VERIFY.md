@@ -23,15 +23,31 @@
 | REQ-001 | PASS | src/auth/session.ts:42; `npm test -- session` passed |
 | REQ-002 | FAIL | criterion says 30 min TTL, code sets 3600s (session.ts:51) |
 | REQ-003 | INCONCLUSIVE | no test exercises concurrent login |
+| REQ-004 | BLOCKED | `npm run e2e` -> ERR_NETWORK_ACCESS_DENIED; the criterion needs the deployed site |
 
-VERDICT: <PASS | FAIL> (<n> pass, <n> fail, <n> inconclusive)
+VERDICT: <PASS | FAIL> (<n> pass, <n> fail, <n> blocked, <n> inconclusive)
 
 <!--
-  INCONCLUSIVE is a first-class result, not a soft fail. Forcing every REQ into
+  Neither BLOCKED nor INCONCLUSIVE is a soft fail. Forcing every REQ into
   PASS/FAIL pushes a verifier toward passing whatever it cannot check, which is
-  the exact failure this document exists to prevent. INCONCLUSIVE means: this
-  needs a different kind of evidence (hardware, a real user, a load test) and
-  the spec should say how.
+  the exact failure this document exists to prevent.
+
+  They are separated because they are repaired by different people:
+
+    BLOCKED       the criterion is runnable, but not from here - denied network,
+                  missing program, absent device. Nothing about the product is in
+                  question. Fix the environment (`il preflight` names most of
+                  these before the round starts) and re-run. Do NOT open a product
+                  task for it, and do not amend the criterion to route around it
+                  without saying so.
+    INCONCLUSIVE  no obstacle - the evidence the criterion asks for does not
+                  exist. Somebody has to write a test, take a measurement, or
+                  watch a screen. That is a change to CRITERIA.md, which re-opens
+                  the gate.
+
+  On the run that produced this distinction, a verifier with a denied network
+  reported INCONCLUSIVE, and the loop responded by opening product tasks against
+  code that was already correct.
 -->
 
 ## Notes

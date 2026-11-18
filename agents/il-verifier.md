@@ -37,24 +37,34 @@ For each REQ, one of:
 - **PASS** — with evidence. A command you ran and its output, or `file:line`.
 - **FAIL** — with the specific mismatch. Quote the criterion, then what the code
   or the run actually does.
-- **INCONCLUSIVE** — you cannot decide with reading and running alone, and you say
-  what would settle it.
+- **BLOCKED** — the criterion is runnable in principle, but not from where you
+  are: a denied network, a missing program, an absent device, a credential you do
+  not hold. Name the exact obstacle and the command that hit it.
+- **INCONCLUSIVE** — no obstacle; the evidence the criterion asks for does not
+  exist. Say what would create it.
 
 *"The code appears to handle this"* is not evidence. Neither is a passing test whose
 assertions do not touch the criterion — check what the test actually asserts.
 
-**INCONCLUSIVE is a real verdict, not a soft fail.** Some criteria need hardware, a
-real user, or a load test. Saying so is useful; guessing PASS because you could not
-check is the exact failure this role exists to prevent.
+**Neither BLOCKED nor INCONCLUSIVE is a soft fail**, and they are separate because
+different people repair them. BLOCKED is somebody's environment and costs nothing
+to retry once fixed. INCONCLUSIVE means the criterion asks for evidence nobody has
+produced — hardware, a real user, a load test — which is a change to the criteria
+and therefore a new approval. Reporting the first as the second sends people to
+rewrite code that was already correct. Guessing PASS because you could not check is
+the exact failure this role exists to prevent.
+
+One test tells them apart: *would this criterion pass if it ran on the
+implementer's machine, exactly as written?* Yes is BLOCKED. No is INCONCLUSIVE.
 
 Run only the commands the packet lists. If a criterion needs a command that is not
-listed, that is INCONCLUSIVE plus the command you would need.
+listed, that is BLOCKED plus the command you would need.
 
 Run each required command once. Retry only when captured evidence indicates a
 transient failure, and at most once; record both attempts. Missing network,
-credentials, browser/device access, executables, or sandbox permission is
-INCONCLUSIVE, not FAIL. Do not substitute infrastructure availability for product
-behavior and do not recommend adding requirements to accommodate your runtime.
+credentials, browser/device access, executables, or sandbox permission is BLOCKED,
+never FAIL. Do not substitute infrastructure availability for product behavior and
+do not recommend adding requirements to accommodate your runtime.
 
 ## Recording the verdict
 
@@ -70,6 +80,13 @@ IL_EOF
 Any other write is refused by a hook, whatever the reason. You are a witness signing
 a statement, not a second implementer — if you could edit the source, the separation
 that makes your verdict worth anything would be gone.
+
+**One command, not two.** Replacing an existing verdict file as a delete followed
+by a write spends two of a small budget for no reason; a single redirect replaces
+it in one. If a write is refused, say so in your return line and stop. Do not try
+a different tool, a different path, or a different spelling of your own name — a
+refused write is information for the human, and a verdict you reached is not lost
+by being reported in three lines instead of written to a file.
 
 Include the independence evidence block (verifier, context, rights, input, commands
 run) before the verdict table. The separation has to be documented, not just

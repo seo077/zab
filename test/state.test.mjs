@@ -255,3 +255,103 @@ test('composeSessionContext never throws and always returns a string', () => {
     assert.equal(typeof composeSessionContext(bad), 'string');
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// generated output vs. human work
+//
+// The resume question exists to protect half-finished implementation work, and
+// it only works if it is rare. On a real run it stopped being rare: browser
+// screenshots, evidence JSON and a web export are all expected output of the
+// phase that just ran, and every one of them made the session open with ACTION
+// REQUIRED about files the harness had generated itself.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('declared generated artifacts are a note, not a blocking question', () => {
+  const dirty = ['build/web/index.wasm', 'build/evidence/req-014.json', 'build/evidence/shot.png'];
+  const out = composeSessionContext(ctx({ git: { ...CLEAN_GIT, dirty }, artifacts: ['build/**'] }));
+  assert.doesNotMatch(out, /ACTION REQUIRED/);
+  assert.match(out, /generated/i);
+});
+
+test('an undeclared file among generated ones still asks — the harness never guesses', () => {
+  const dirty = ['build/evidence/shot.png', 'scripts/combat.gd'];
+  const out = composeSessionContext(ctx({ git: { ...CLEAN_GIT, dirty }, artifacts: ['build/**'] }));
+  assert.match(out, /ACTION REQUIRED/);
+  assert.match(out, /combat\.gd/);
+  assert.doesNotMatch(out, /2 file\(s\) have uncommitted/, 'and it counts only the real change');
+});
+
+test('without a declaration, generated paths are treated as human work', () => {
+  const out = composeSessionContext(ctx({ git: { ...CLEAN_GIT, dirty: ['build/evidence/shot.png'] } }));
+  assert.match(out, /ACTION REQUIRED/);
+});
+
+test('artifact registration advice does not weaken protection of undeclared evidence', () => {
+  const dirty = ['build/web-evidence/deployed/result.json'];
+  const out = composeSessionContext(
+    ctx({
+      git: { ...CLEAN_GIT, dirty },
+      artifactSuggestions: [
+        { glob: 'build/web-evidence/deployed/**', sessions: 2, example: dirty[0] },
+      ],
+    })
+  );
+  assert.match(out, /policy\.json artifacts/);
+  assert.match(out, /nothing was deleted or reclassified/i);
+  assert.match(out, /ACTION REQUIRED/, 'the undeclared evidence remains protected');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HEAD moved: a finished task, or a rewind?
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('HEAD advancing past the anchor is a note, not a blocker', () => {
+  // A commit is the normal end of a task. Treating every HEAD move as a resume
+  // hazard interrogates the human about the thing the harness just told them to
+  // do - and on a real run that is what stopped a finished feature from starting
+  // the next one.
+  const out = composeSessionContext(
+    ctx({ git: { ...CLEAN_GIT, head: '9f8e7d6', anchor: 'advanced', ahead: 1 } })
+  );
+  assert.doesNotMatch(out, /ACTION REQUIRED/);
+  assert.match(out, /advanced/i);
+  assert.match(out, /9f8e7d6/);
+  assert.match(out, /head_commit/, 'and says what to do about it');
+});
+
+test('HEAD no longer containing the anchor still stops everything', () => {
+  for (const anchor of ['diverged', 'unknown', null]) {
+    const out = composeSessionContext(ctx({ git: { ...CLEAN_GIT, head: '9f8e7d6', anchor } }));
+    assert.match(out, /ACTION REQUIRED/, `anchor=${anchor}`);
+    assert.match(out, /a1b2c3d/);
+    assert.match(out, /9f8e7d6/);
+  }
+});
+
+test('an unknown ancestry is treated as a hazard, not as an advance', () => {
+  // Fail toward the question. git may be missing, the repo may be shallow, the
+  // command may have timed out; none of those are evidence that the anchor is
+  // still reachable.
+  const out = composeSessionContext(ctx({ git: { ...CLEAN_GIT, head: '9f8e7d6', anchor: null } }));
+  assert.match(out, /rewind, a rebase or a different branch/i);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// a stale mirror says which of three things happened
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('the mirror warning names the document that actually moved', () => {
+  const out = composeSessionContext(
+    ctx({ gate: { open: false, why: 'SPEC.md changed since G0 was approved for 001-login', feature: '001-login' } })
+  );
+  assert.match(out, /SPEC\.md changed/);
+  assert.match(out, /amended the spec/i, 'so nobody goes hunting for tampering');
+  assert.match(out, /mirror/i, 'the rule itself is unchanged');
+});
+
+test('a signature failure still reads as tampering', () => {
+  const out = composeSessionContext(
+    ctx({ gate: { open: false, why: 'approval record for 001-login failed signature check', feature: '001-login' } })
+  );
+  assert.match(out, /tampering/i);
+});

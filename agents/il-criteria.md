@@ -78,6 +78,27 @@ implementation, it is not a criterion, it is a formality.
   exists; if you name a path, confirm the path exists or say that creating it is
   part of the work.
 
+### If your packet says this is an amendment
+
+Sometimes a human has already approved criteria for this feature and only part of
+the spec has moved since. The packet then names the requirements that moved, and
+lists the ones that did not.
+
+Open the existing `CRITERIA.md` and **carry the unlisted entries through exactly as
+they stand.** Do not improve them, do not restyle them, do not renumber them. Those
+criteria were reviewed by a critic and approved by a person against a requirement
+that has not changed a character, and re-deriving them can only move them — which
+is the whole reason the yardstick is bound to the approval in the first place.
+
+You still write the whole file: it is the only path you may write, and a partial
+file is a broken one. What is scoped is the derivation, not the output.
+
+If a carried entry looks wrong to you, say so in your return line and leave it
+alone. Altering one is detected — the approval recorded a hash per requirement —
+and it re-opens that requirement for review, which costs the human the round this
+scoping exists to save. Saying "REQ-006's criterion looks circular to me" gets the
+same thing fixed with the human's knowledge rather than behind their back.
+
 ### When a requirement cannot be judged by reading and running
 
 Some things genuinely need hardware, a real user, or a load test. Say so:

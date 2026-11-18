@@ -1216,6 +1216,161 @@ const CRITERIA_BLOCKER_KINDS = new Set([
   'orphan-criterion',
 ]);
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § delta — what actually moved since the approval that is now void
+//
+// Editing SPEC.md or CRITERIA.md closes G0, and that is correct: the approval
+// binds to both documents and nothing may move underneath it. What was NOT
+// correct was the consequence. A two-line amendment to how REQ-014 is verified
+// sent all seventeen requirements back through il-criteria, back through the
+// critic, and back to the human — four times over, on one real run, because each
+// full re-review surfaced unrelated old findings.
+//
+// So the gate is unchanged and the delta is about *whose work is redone*. The
+// approval still binds both whole-document hashes. The human still types the
+// keystrokes. What narrows is the scope handed to the two agents, and the price
+// of narrowing it is that the approval record says exactly which requirements
+// carried a verdict forward and from which spec — that is the assurance
+// difference, written down where the human reads it rather than assumed away.
+//
+// The baseline is the SIGNED approval token, never a file in the repo. "I reused
+// REQ-001..REQ-013" from a model is an assertion; the same claim checked against
+// per-requirement hashes recorded at approval time is a fact.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** REQ id -> hash of that requirement's own text. Order- and comment-independent. */
+export function requirementDigest(specText) {
+  const out = {};
+  try {
+    const region = normativeRegion(typeof specText === 'string' ? specText : '');
+    const text = withoutComments(region.split(/\r?\n/)).join('\n');
+    for (const b of requirementBlocks(text)) {
+      const body = [b.tag ? `[${b.tag}]` : '', b.text, ...b.rest].join('\n');
+      out[b.id.toUpperCase()] = sha256hex(normalizeText(body)).slice(0, 12);
+    }
+  } catch {
+    /* an unparseable spec digests as empty, which reads as "no baseline" */
+  }
+  return out;
+}
+
+/** Hash normative context shared by requirements: threats, assumptions,
+ * vocabulary and common models. REQ blocks themselves are removed. */
+export function sharedNormativeDigest(specText) {
+  try {
+    const lines = withoutComments(
+      normativeRegion(typeof specText === 'string' ? specText : '').split(/\r?\n/)
+    );
+    const shared = [];
+    let inRequirement = false;
+    for (const line of lines) {
+      if (/^\s*REQ-\d+\b/i.test(line)) {
+        inRequirement = true;
+        continue;
+      }
+      if (inRequirement && (/^#{1,6}\s/.test(line) || /^\s*ASM-\d+\b/i.test(line))) {
+        inRequirement = false;
+      }
+      if (!inRequirement) shared.push(line);
+    }
+    return sha256hex(normalizeText(shared.join('\n'))).slice(0, 12);
+  } catch {
+    return '';
+  }
+}
+
+/** REQ id -> hash of the criterion that judges it. */
+export function criteriaDigest(criteriaText) {
+  const out = {};
+  try {
+    for (const [id, c] of parseCriteria(criteriaText)) {
+      out[id] = sha256hex(
+        normalizeText([c.tag ? `[${c.tag}]` : '', c.judged ?? '', c.method ?? ''].join('\n'))
+      ).slice(0, 12);
+    }
+  } catch {
+    /* same */
+  }
+  return out;
+}
+
+/**
+ * @param {{req_digest?: object, criteria_digest?: object}} baseline the last approval token
+ * @returns {{available: boolean, added: string[], changed: string[], removed: string[],
+ *            unchanged: string[], criteriaChanged: string[],
+ *            needCriteria: string[], needReview: string[], carried: string[]}}
+ */
+export function computeDelta(baseline, specText, criteriaText) {
+  const empty = {
+    available: false,
+    globalChanged: false,
+    added: [], changed: [], removed: [], unchanged: [], criteriaChanged: [],
+    needCriteria: [], needReview: [], carried: [],
+  };
+  try {
+    const prevReq = baseline?.req_digest;
+    if (!prevReq || typeof prevReq !== 'object' || Object.keys(prevReq).length === 0) return empty;
+    if (typeof baseline?.shared_digest !== 'string' || !baseline.shared_digest) {
+      return { ...empty, globalChanged: true };
+    }
+    const prevCri = baseline?.criteria_digest ?? {};
+
+    const nowReq = requirementDigest(specText);
+    const nowCri = criteriaDigest(criteriaText);
+    if (Object.keys(nowReq).length === 0) return empty;
+    const nowShared = sharedNormativeDigest(specText);
+    if (!nowShared || baseline.shared_digest !== nowShared) {
+      return { ...empty, globalChanged: true };
+    }
+
+    const added = [], changed = [], removed = [], unchanged = [], criteriaChanged = [];
+    for (const id of Object.keys(nowReq)) {
+      if (!(id in prevReq)) added.push(id);
+      else if (prevReq[id] !== nowReq[id]) changed.push(id);
+      else unchanged.push(id);
+    }
+    for (const id of Object.keys(prevReq)) if (!(id in nowReq)) removed.push(id);
+
+    // A criterion that moved re-opens its requirement for review even when the
+    // requirement itself did not: the yardstick is half of what was approved.
+    for (const id of Object.keys(nowCri)) {
+      if (!(id in prevCri) || prevCri[id] !== nowCri[id]) criteriaChanged.push(id);
+    }
+    for (const id of Object.keys(prevCri)) {
+      if (!(id in nowCri) && !criteriaChanged.includes(id)) criteriaChanged.push(id);
+    }
+
+    const sort = (a) => [...new Set(a)].sort();
+    const needCriteria = sort([...added, ...changed]);
+    // A deleted requirement is still a change the critic must inspect. It no
+    // longer has a current block to hash, but omitting it here can make a
+    // deletion-only amendment look like "nothing moved" while G0 is closed.
+    const needReview = sort([...added, ...changed, ...removed, ...criteriaChanged]);
+    const needReviewSet = new Set(needReview);
+    return {
+      available: true,
+      added: sort(added),
+      changed: sort(changed),
+      removed: sort(removed),
+      unchanged: sort(unchanged),
+      criteriaChanged: sort(criteriaChanged),
+      needCriteria,
+      needReview,
+      carried: sort(unchanged.filter((id) => !needReviewSet.has(id))),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/** Compact "REQ-001..REQ-013, REQ-015" rather than seventeen ids on one line. */
+export function summarizeIds(ids, max = 6) {
+  const list = Array.isArray(ids) ? ids : [];
+  if (list.length <= max) return list.join(', ');
+  return `${list.slice(0, max - 1).join(', ')} … ${list[list.length - 1]} (${list.length} total)`;
+}
+
 const VERDICT_LINE_RE = /^[ \t]*VERDICT[ \t]*[:：][ \t]*(READY|NOT[ \t]*YET)[ \t]*$/im;
 const REVIEWED_LINE_RE =
   /reviewed[ \t]*[:：][ \t]*spec[ \t]+([0-9a-f]{6,64})[ \t]+criteria[ \t]+([0-9a-f]{6,64})/i;
@@ -1270,6 +1425,104 @@ export function parseReview(reviewText) {
 // criteria carried verbatim. And written to a FILE, so the same input can later
 // be handed to a different model entirely (v0.2 `--cross`).
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// § preflight — can this verification run at all?
+//
+// Two full verification rounds on one real run returned nothing but
+// INCONCLUSIVE, and neither was about the code. The first: `policy.verify.commands`
+// was empty, so the verifier had no execution rights and could not run anything.
+// The second: the criteria named `godot4`, which was not on PATH — the executable
+// lived in the repository. Both were discovered AFTER implementation was
+// complete and a fresh agent had read seventeen requirements.
+//
+// Both are answerable in two seconds before any of that. The check is
+// deliberately shallow: it asks whether the thing named can be found, not
+// whether it works. A deeper check would be wrong here — it would start failing
+// for reasons that are not the harness's business, and a preflight that cries
+// wolf is one people learn to skip.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The executables a verification round would have to be able to launch.
+ *
+ * Pure, so the answer table is testable: resolution against the real filesystem
+ * happens in the caller.
+ *
+ * @returns {Array<{exe: string, from: string, where: string}>}
+ */
+export function verifyExecutables(commands, criteriaText) {
+  const out = new Map();
+  const add = (exe, from, where) => {
+    if (!exe) return;
+    const key = `${exe}\u0000${where}`;
+    if (!out.has(key)) out.set(key, { exe, from, where });
+  };
+  try {
+    for (const raw of Array.isArray(commands) ? commands : []) {
+      const exe = leadingExecutable(String(raw ?? ''));
+      add(exe, String(raw ?? '').slice(0, 60), 'policy.verify.commands');
+    }
+    for (const [id, c] of parseCriteria(criteriaText)) {
+      const method = String(c?.method ?? '');
+      if (!method) continue;
+      for (const line of method.split(/\n/)) {
+        // In "First run `node ...`", the code span is the command and the
+        // surrounding natural language is not an executable candidate.
+        const spans = [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+        // Single-token spans in prose are usually identifiers, fixture names or
+        // evidence paths. A runnable invocation has a command plus arguments.
+        const fragments = spans.length ? spans.filter((span) => /\s/.test(span.trim())) : [line];
+        for (const fragment of fragments) {
+          const exe = leadingExecutable(fragment);
+          if (exe) add(exe, fragment.trim().slice(0, 60), id);
+        }
+      }
+    }
+  } catch {
+    /* an unparseable criteria file preflights as "nothing to check" */
+  }
+  return [...out.values()];
+}
+
+const NOT_AN_EXE = new Set(['sudo', 'env', 'time', 'nohup', 'exec', 'command', 'then', 'else', 'fi', 'do', 'done']);
+
+/**
+ * The program a command line would actually launch, or '' if the line is prose.
+ *
+ * Criteria Methods are written by a model in a mix of shell and English, so this
+ * has to decline far more often than it accepts. Anything that does not look
+ * like an invocation is not one.
+ */
+export function leadingExecutable(line) {
+  let s = String(line ?? '').trim();
+  if (!s || /^[#>|]/.test(s)) return '';
+  // PowerShell environment assignments are prefixes, not programs.
+  for (let guard = 0; guard < 4; guard++) {
+    const env = /^\$env:[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:'[^']*'|"[^"]*"|[^;]+)\s*;\s*/i.exec(s);
+    if (!env) break;
+    s = s.slice(env[0].length).trim();
+  }
+  s = s.replace(/^[`$]+\s*/, '').replace(/\s*`+$/, '');
+  // `FOO=bar cmd` and `sudo cmd` — step past the prefix, not into it.
+  for (let guard = 0; guard < 4; guard++) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*=\S*)\s+/.exec(s);
+    if (m) { s = s.slice(m[0].length); continue; }
+    const w = /^(\S+)\s+/.exec(s);
+    if (w && NOT_AN_EXE.has(w[1])) { s = s.slice(w[0].length); continue; }
+    break;
+  }
+  const first = s.split(/\s+/)[0] ?? '';
+  if (!first) return '';
+  // Inline-code environment/config identifiers are not invocations.
+  if (/^[A-Z][A-Z0-9_]+$/.test(first)) return '';
+  // Prose. A criterion Method often opens with a sentence, and treating its
+  // first word as a program name produces noise that buries the real finding.
+  if (!/^[.~/\\A-Za-z0-9_$-]/.test(first)) return '';
+  if (/[,;:"'?()]$/.test(first)) return '';
+  if (/^(the|a|an|run|open|check|inspect|see|assert|read|observe|confirm|verify|manually|use|with|and|then|in|at|by|for)$/i.test(first)) return '';
+  return first;
+}
 
 export const VERIFY_PACKET_FILE = '.verify-packet.md';
 
@@ -1377,16 +1630,25 @@ METHOD
   Plus read-only inspection: git diff, grep, reading files.
 
   For each requirement return exactly one of:
-    PASS          with evidence — a command you ran and its output, or file:line
+    PASS          with evidence - a command you ran and its output, or file:line
     FAIL          quote the criterion, then what the code or the run actually does
-    INCONCLUSIVE  you cannot decide by reading and running; say what would settle it
+    BLOCKED       the criterion is runnable in principle, but not from where you are:
+                  the network is denied, a program is missing, a device is absent.
+                  Name the exact obstacle and the command that hit it.
+    INCONCLUSIVE  no obstacle - the evidence needed does not exist. Say what would
+                  settle it: a test nobody wrote, an observation nobody made.
 
   "The code appears to handle this" is not evidence. A passing test whose assertions
-  do not touch the criterion is not evidence either — check what it asserts.
+  do not touch the criterion is not evidence either - check what it asserts.
 
-  INCONCLUSIVE is a real verdict, not a soft fail. Some criteria need hardware, a
-  real user or a load test. Guessing PASS because you could not check is the exact
-  failure this role exists to prevent.
+  BLOCKED and INCONCLUSIVE both mean "I did not decide", and separating them is not
+  bookkeeping: they are repaired by different people. BLOCKED is the caller's
+  environment and costs nothing to retry once fixed. INCONCLUSIVE means the
+  criterion asks for evidence that does not exist, which is a change to CRITERIA.md
+  and therefore a new approval. Filing the first as the second is how a denied
+  network turned into a product task on a real run; filing the second as the first
+  is how a missing test gets retried forever. Neither is a soft FAIL, and guessing
+  PASS because you could not check is the exact failure this role exists to prevent.
 
 RECORD IT with exactly one command, to the only path you are permitted to write:
 
@@ -1399,8 +1661,8 @@ RECORD IT with exactly one command, to the only path you are permitted to write:
   ran: <command> -> <result>
 
   ## Verdict
-  REQ-001 | PASS/FAIL/INCONCLUSIVE | evidence
-  VERDICT: <PASS|FAIL> (<n> pass, <n> fail, <n> inconclusive)
+  REQ-001 | PASS/FAIL/BLOCKED/INCONCLUSIVE | evidence
+  VERDICT: <PASS|FAIL> (<n> pass, <n> fail, <n> blocked, <n> inconclusive)
   IL_EOF
 
 Any other write is refused by a hook regardless of reason. You are a witness signing
@@ -1412,6 +1674,39 @@ Do not propose fixes. Do not soften a FAIL because the work is nearly there.
   } catch {
     return '';
   }
+}
+
+/**
+ * The paragraph that turns a full criteria run into a scoped one.
+ *
+ * A scoped run still writes the whole file — CRITERIA.md is the only path this
+ * agent may write, and half a file is a broken one. What is scoped is the
+ * derivation. Re-deriving a criterion that nobody asked about is not free: it is
+ * how an amendment to one requirement quietly moves the yardstick under sixteen
+ * others, and on a real run that turned a two-line verification change into four
+ * rounds of unrelated findings.
+ */
+function amendmentNote(work, scope, carried) {
+  const list = carried.length ? summarizeIds(carried, 10) : '(none)';
+  return `
+THIS IS AN AMENDMENT, NOT A FIRST DRAFT
+
+A human already approved criteria for this feature. These ${carried.length}
+requirement(s) have not changed a character since that approval, so their criteria
+are already settled and are not yours to revisit:
+
+  ${list}
+
+Open the existing CRITERIA.md and carry those entries through unchanged, exactly
+as they stand. Write or rewrite only these:
+
+  ${scope.join(', ')}
+
+Altering a carried entry is detected — the approval recorded a hash per
+requirement — and it re-opens that requirement for review, which is the cost this
+scoping exists to avoid. If you think a carried criterion is wrong, say so in your
+return line and leave the entry alone.
+`;
 }
 
 /**
@@ -1441,9 +1736,17 @@ export function composeCriteriaPacket(input) {
       .join('\n')
       .trim();
     const region = withoutComments(normativeRegion(spec).split(/\r?\n/)).join('\n');
-    const reqs = requirementBlocks(region)
+    const scope =
+      Array.isArray(input?.scope) && input.scope.length
+        ? new Set(input.scope.map((s) => String(s).toUpperCase()))
+        : null;
+    const carried = Array.isArray(input?.carried) ? input.carried : [];
+    const allReqs = requirementBlocks(region);
+    const shownReqs = scope ? allReqs.filter((b) => scope.has(b.id.toUpperCase())) : allReqs;
+    const reqs = shownReqs
       .map((b) => [`${b.id}${b.tag ? ` [${b.tag}]` : ''} ${b.text}`, ...b.rest.map((r) => `  ${r}`)].join('\n'))
       .join('\n\n');
+    const scopeSection = scope ? amendmentNote(work, [...scope].sort(), carried) : '';
 
     return `ROLE: acceptance criteria — ${feature}, as il-criteria.
 
@@ -1462,14 +1765,15 @@ ${decSection || '(no decisions recorded — say so in your return; a spec with n
 REQUIREMENTS
 
 ${reqs || '(no requirements found — report this and stop)'}
-
+${scopeSection}
 ALSO READ
   ${work}/SPEC.md   the whole thing, including background and threat model
   CONTEXT.md        the project's own vocabulary, if it exists
   the repository    what already exists: test commands, fixtures, tooling
 
-WRITE ${work}/CRITERIA.md — the only path you may write. One entry per REQ above,
-including any you cannot work out how to judge:
+WRITE ${work}/CRITERIA.md — the only path you may write. The file carries one
+entry per REQ in the feature (carried entries reproduced, listed ones written
+fresh), including any you cannot work out how to judge:
 
   REQ-001
     Judged: <the observable fact that settles it, with numbers and units>
@@ -1518,6 +1822,37 @@ export function composeReviewPacket(input) {
     const work = `${HARNESS_DIR}/work/${feature}`;
     const s8 = specHash(String(input?.spec ?? '')).slice(0, 8);
     const c8 = specHash(String(input?.criteria ?? '')).slice(0, 8);
+    const scope = Array.isArray(input?.scope) && input.scope.length ? input.scope : null;
+    const carried = Array.isArray(input?.carried) ? input.carried : [];
+    const from = String(input?.carriedFrom ?? '').slice(0, 8);
+
+    // Telling the critic where the change is does not narrow what it may object
+    // to. It reads the whole pair either way — a criterion is only judgeable
+    // against the requirements around it. What it narrows is where it is asked to
+    // look first, and it is told plainly that findings outside the scope are
+    // still findings. The alternative, measured on a real run, is that every
+    // amendment reopens the entire document and the human approves four times.
+    const scopeSection = scope
+      ? `
+WHERE THE CHANGE IS
+
+This is an amendment. A human approved this feature before${from ? ` at spec ${from}` : ''};
+${carried.length} requirement(s) are byte-identical to what they approved then, and
+these are the ones that moved:
+
+  ${scope.join(', ')}
+
+Read the whole pair anyway — a criterion is only judgeable against the
+requirements around it, and an amendment that breaks a neighbour is exactly the
+kind of thing you were asked here to catch. Lead with the moved requirements. If
+you find something serious in the carried ones, say it: a finding outside the
+scope is still a finding, and "it was approved before" is not an answer.
+
+Record the scope in your verdict, so the human can see what this review covered:
+
+  scope: amendment — ${summarizeIds(scope, 8)}${carried.length ? `; ${carried.length} carried unchanged` : ''}
+`
+      : '';
 
     return `ROLE: pre-approval critic — ${feature}, as il-spec-critic.
 
@@ -1533,6 +1868,7 @@ READ, WHOLE, BEFORE FORMING ANY VIEW
                        which wrote neither the spec nor the code
   CONTEXT.md           the project's vocabulary, if it exists
 
+${scopeSection}
 You are the first party to see the two side by side, and that pairing is most of
 what you are checking. One question:
 
@@ -1555,6 +1891,7 @@ CRITERIA; a critic that could edit either could quietly resolve its own findings
   ## Independence evidence
   - critic: il-spec-critic / subagent / fresh context, interview not read
   - reviewed: spec ${s8} criteria ${c8}
+  - scope: <whole spec, or: amendment - the ids you were given above>
   - rights: read + execute; no write except this file
 
   ## Findings
@@ -1958,7 +2295,7 @@ export function detectHost(input = {}, env = process.env) {
  * Codex does not send it, and its `spawn_agent` takes the agent type as a
  * model-supplied argument, so there is no attested identity to read. `IL_AGENT`
  * remains as a compatibility label for hosts that can provide it; current Codex
- * uses the single-use judgement grant armed when a fixed packet is built.
+ * uses the bounded judgement grant armed when a fixed packet is built.
  */
 function agentIdentity(input, env = process.env) {
   const attested = String(input?.agent_type ?? '');
@@ -2061,10 +2398,32 @@ function loadKey(home) {
   }
 }
 
-/** Stable serialization so the signature does not depend on key order. */
+/**
+ * Stable serialization so the signature does not depend on key order.
+ *
+ * Written by hand rather than with JSON.stringify's replacer argument, which
+ * looks like it does this and does not: an array replacer is an allowlist
+ * applied at EVERY depth, so any nested object serializes as `{}` and its
+ * contents are simply not signed. That was invisible while every field in every
+ * token was a scalar, and it stopped being invisible the moment one held a map.
+ * A signature that silently covers less than the document it is attached to is
+ * worse than no signature, because everything downstream reads as verified.
+ */
 function canonical(obj) {
   const { sig, ...rest } = obj;
-  return JSON.stringify(rest, Object.keys(rest).sort());
+  return stableStringify(rest);
+}
+
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') {
+    const s = JSON.stringify(value);
+    return s === undefined ? 'null' : s;
+  }
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const keys = Object.keys(value)
+    .filter((k) => value[k] !== undefined)
+    .sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
 }
 
 export function signToken(key, token) {
@@ -2090,7 +2449,30 @@ function readLease(home, pid, feature) {
   return readJsonSafe(join(storeDir(home, pid), 'leases', `${feature}.json`));
 }
 
-const JUDGEMENT_GRANT_MS = 10 * 60_000;
+/**
+ * How long a judgement grant lives, and how many tool calls it covers.
+ *
+ * Both numbers were wrong on the first design, and a real run showed how.
+ *
+ * Ten minutes assumed the write happens shortly after the packet is built. A
+ * verifier ruling on seventeen requirements runs the project's own test suite
+ * first; by the time it has an answer the capability has expired, and the only
+ * way back is to rebuild the packet, which means a fresh agent that has to redo
+ * the judgement it already made.
+ *
+ * One use assumed one write. Replacing an existing judgement file is a delete
+ * and then an add, so the delete consumed the grant and the add was refused —
+ * the verdict was reached and then could not be recorded. A failed write burned
+ * it the same way, because PreToolUse fires BEFORE the tool runs and can never
+ * learn whether it succeeded. That is a property of the hook point, not
+ * something to engineer around: the honest fix is a small budget rather than a
+ * pretence of exactly-once.
+ *
+ * The budget is what keeps this a capability rather than a mode: it is bound to
+ * one feature, one artifact, one owner, and it still expires.
+ */
+const JUDGEMENT_GRANT_MS = 30 * 60_000;
+const JUDGEMENT_GRANT_USES = 4;
 
 function judgementGrantPath(home, pid, artifact) {
   return join(storeDir(home, pid), 'judgement-grants', `${artifact}.json`);
@@ -2103,7 +2485,7 @@ function projectJudgementGrantPath(projectDir, feature, artifact) {
 /**
  * Codex does not attest subagent identity and spawn_agent cannot set per-agent
  * environment variables. Building the fixed packet therefore arms one
- * short-lived, single-use write to that packet's output artifact.
+ * short-lived, bounded write capability for that packet's output artifact.
  */
 function armJudgementGrant(ctx, artifact, owner) {
   if (detectHost({}, ctx.env) !== 'codex' || !ctx.feature) return false;
@@ -2116,6 +2498,8 @@ function armJudgementGrant(ctx, artifact, owner) {
     owner,
     granted_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + JUDGEMENT_GRANT_MS).toISOString(),
+    uses: 0,
+    max_uses: JUDGEMENT_GRANT_USES,
   };
   let storage = 'external';
   let ok = writeSigned(ctx.home, pid, join('judgement-grants', `${artifact}.json`), grant);
@@ -2123,7 +2507,7 @@ function armJudgementGrant(ctx, artifact, owner) {
     // Codex CLI reports run inside the workspace sandbox. On managed Windows
     // builds that process can read ~/.interlocking/key but cannot create the
     // short-lived grant beside it. Keep the human approval store external, but
-    // fall back to a signed, single-use capability under the project harness.
+    // fall back to a signed, bounded capability under the project harness.
     // The signature still prevents an ordinary edit from minting a grant.
     storage = 'project';
     ok = writeSignedPath(
@@ -2147,31 +2531,61 @@ function consumeJudgementGrant(ctx, artifact, owner) {
   ];
   for (const path of paths) {
     const grant = readJsonSafe(path);
+    const uses = Number(grant?.uses ?? 0);
+    const max = Number(grant?.max_uses ?? 1);
     const valid = Boolean(
       verifyToken(key, grant) &&
         grant?.kind === 'judgement-write' &&
         grant?.feature === ctx.feature &&
         grant?.artifact === artifact &&
         grant?.owner === owner &&
+        uses < max &&
         Date.parse(grant?.expires_at) > Date.now()
     );
     if (!valid) continue;
-    try {
-      unlinkSync(path);
-    } catch {
-      continue;
-    }
-    // A successful write consumes the capability everywhere. This prevents a
-    // stale fallback from granting a second write if storage availability flips.
-    for (const other of paths) {
-      if (other === path) continue;
-      try {
-        unlinkSync(other);
-      } catch {
-        /* absent or inaccessible is already consumed enough */
+
+    // Spend one use rather than destroying the capability. The hook runs before
+    // the tool does, so "the write succeeded" is not a fact available here; a
+    // budget is the closest honest approximation, and it is what lets a replace
+    // (delete, then add) and one retry land without the verdict being lost.
+    const next = { ...grant, uses: uses + 1, last_used_at: new Date().toISOString() };
+    delete next.sig;
+    const stored = path.startsWith(join(ctx.projectDir, HARNESS_DIR))
+      ? writeSignedPath(ctx.home, path, next)
+      : writeSigned(ctx.home, pid, join('judgement-grants', `${artifact}.json`), next);
+
+    if (!stored) {
+      // The counter could not be persisted. Refusing here would strand a correct
+      // agent over bookkeeping, so allow the write and remove the grant instead:
+      // an uncountable capability must not be an unlimited one.
+      for (const other of paths) {
+        try {
+          unlinkSync(other);
+        } catch {
+          /* absent or inaccessible is already consumed enough */
+        }
+      }
+    } else if (uses + 1 >= max) {
+      for (const other of paths) {
+        if (other === path) continue;
+        try {
+          unlinkSync(other);
+        } catch {
+          /* a stale fallback must not grant a use after the budget is spent */
+        }
       }
     }
-    audit(ctx.home, pid, { at: new Date().toISOString(), event: 'judgement-consume', feature: ctx.feature, artifact, owner });
+
+    audit(ctx.home, pid, {
+      at: new Date().toISOString(),
+      event: 'judgement-consume',
+      feature: ctx.feature,
+      artifact,
+      owner,
+      use: uses + 1,
+      of: max,
+      counted: stored,
+    });
     return true;
   }
   return false;
@@ -2311,6 +2725,83 @@ function truncate(s, max) {
 }
 
 /**
+ * Split uncommitted paths into what the harness produced and what a human did.
+ *
+ * The resume question exists to protect half-finished implementation work, and
+ * it only works if it is rare. On a real run it stopped being rare: verify
+ * packets, browser screenshots, evidence JSON and downloaded fixtures are all
+ * expected output of the phase that just ran, and every one of them made the
+ * session open with ACTION REQUIRED about files it had generated itself one
+ * command earlier. A question asked every time is a question nobody reads.
+ *
+ * `.interlocking/**
+ * What to do about a STATE.md mirror that disagrees with the signed store.
+ *
+ * The mirror is deliberately never rewritten by the hook: a harness that
+ * silently repairs the record of its own gate has destroyed the one signal that
+ * says someone edited it. But the generic warning sent people hunting for
+ * tampering when the cause was an amendment they had just made on purpose, so
+ * the advice now depends on which of the three things happened.
+ */
+export function mirrorAdvice(why) {
+  const w = String(why ?? '');
+  if (/SPEC\.md changed/i.test(w)) {
+    return `You amended the spec. Re-derive the criteria, get a fresh review, and approve again — ${cmd('delta')} shows what actually moved.`;
+  }
+  if (/CRITERIA\.md changed/i.test(w)) {
+    return 'The yardstick moved after approval. Get a fresh review of the pair and approve again.';
+  }
+  if (/missing or unreadable/i.test(w)) {
+    return 'The document the approval binds to is gone. Restore it, or start the approval over.';
+  }
+  if (/signature check/i.test(w)) {
+    return 'This one is not an ordinary mismatch — the stored record failed its signature. Treat it as tampering and tell the human.';
+  }
+  if (/predates/i.test(w)) {
+    return 'The approval predates the criteria binding. Approve once more to re-bind it.';
+  }
+  return 'That line was written without an approval behind it. Approve, or correct the line.';
+}
+
+/**` is managed by definition. Everything else has to be
+ * declared, in `policy.json` under `artifacts` — because a harness that guesses
+ * which of your files are disposable will eventually guess wrong about the one
+ * that was not.
+ *
+ * @param {string[]} paths
+ * @param {string[]} globs  policy.artifacts
+ * @returns {{managed: string[], source: string[]}}
+ */
+export function partitionDirty(paths, globs) {
+  const managed = [];
+  const source = [];
+  const patterns = Array.isArray(globs) ? globs.filter((g) => typeof g === 'string' && g) : [];
+  for (const raw of Array.isArray(paths) ? paths : []) {
+    const rel = String(raw ?? '').replace(/\\/g, '/');
+    if (!rel) continue;
+    const isManaged =
+      rel === HARNESS_DIR ||
+      rel.startsWith(HARNESS_DIR + '/') ||
+      matchesAny(rel, patterns, process.platform === 'win32');
+    (isManaged ? managed : source).push(raw);
+  }
+  return { managed, source };
+}
+
+/** Conservative policy.artifacts candidates. A candidate is advice only: it
+ * never changes classification, deletes a file, or edits policy.json. */
+export function artifactCandidateGlob(rawPath) {
+  try {
+    const rel = String(rawPath ?? '').replace(/\\/g, '/').replace(/^\.\//, '');
+    if (!rel || rel === HARNESS_DIR || rel.startsWith(HARNESS_DIR + '/')) return '';
+    const slash = rel.lastIndexOf('/');
+    return slash > 0 ? `${rel.slice(0, slash)}/**` : rel;
+  } catch {
+    return '';
+  }
+}
+
+/**
  * @returns {string} the text injected at SessionStart. Pure — git and gate facts
  *   are gathered by the caller so this stays testable.
  */
@@ -2352,8 +2843,8 @@ export function composeSessionContext(ctx) {
     const claims = Array.isArray(data.gates_passed) ? data.gates_passed : [];
     if (claims.includes('G0') && !gate.open) {
       out.push('');
-      out.push('⚠ STATE.md claims G0 is passed, but no valid approval backs it.');
-      out.push('  Either SPEC.md changed after approval, or that line was written without one.');
+      out.push(`⚠ STATE.md claims G0 is passed, but the signed store says: ${gate.why}`);
+      out.push(`  ${mirrorAdvice(gate.why)}`);
       out.push('  Edits stay blocked. STATE.md is a mirror, never the authority.');
     }
 
@@ -2409,22 +2900,55 @@ export function composeSessionContext(ctx) {
       // the previous phase just produced. Stopping to ask about them means the
       // harness interrogates the human about files it created itself, one command
       // earlier. The question is here to protect half-finished IMPLEMENTATION work.
-      const harnessOnly = dirty.length > 0 && dirty.every((p) => p.replace(/\\/g, '/').startsWith(HARNESS_DIR + '/'));
-      if (dirty.length && harnessOnly) {
+      const { managed, source } = partitionDirty(dirty, ctx?.artifacts);
+      if (managed.length) {
         out.push('');
-        out.push(`[il] ${dirty.length} uncommitted harness file(s) — commit them as a checkpoint when convenient.`);
-      } else if (dirty.length) {
-        const shown = dirty.slice(0, DIRTY_SHOWN).join(', ');
-        const more = dirty.length > DIRTY_SHOWN ? ` (+${dirty.length - DIRTY_SHOWN} more)` : '';
+        out.push(
+          `[il] ${managed.length} uncommitted harness/generated file(s) — expected output of ` +
+            `this phase; commit them as a checkpoint when convenient.`
+        );
+      }
+      if (source.length) {
+        const shown = source.slice(0, DIRTY_SHOWN).join(', ');
+        const more = source.length > DIRTY_SHOWN ? ` (+${source.length - DIRTY_SHOWN} more)` : '';
         questions.push(
-          `${dirty.length} file(s) have uncommitted changes: ${truncate(shown, 300)}${more}`,
+          `${source.length} file(s) have uncommitted changes il did not generate: ${truncate(shown, 300)}${more}`,
           'Ask the human, and do not decide for them: (a) finish this work  (b) discard and restart the task  (c) show me the diff first'
         );
       }
+      const suggestions = Array.isArray(ctx?.artifactSuggestions) ? ctx.artifactSuggestions : [];
+      if (suggestions.length) {
+        out.push('');
+        out.push('[il] repeated uncommitted paths may be generated artifacts:');
+        for (const item of suggestions.slice(0, 4)) {
+          out.push(`  · ${item.glob} (seen in ${item.sessions} sessions; e.g. ${item.example})`);
+        }
+        out.push(`  If these are generated, add the narrow glob(s) to ${HARNESS_DIR}/policy.json artifacts.`);
+        out.push('  Until you do, il keeps protecting them as possible human work; nothing was deleted or reclassified.');
+      }
+      // A commit is the normal end of a task, so treating every HEAD move as a
+      // resume hazard interrogates the human about the thing the harness just
+      // told them to do — and on a real run that is exactly what stopped a
+      // finished feature from starting the next one. What is genuinely a hazard
+      // is HEAD no longer CONTAINING the commit STATE.md anchored to: a rewind,
+      // a rebase, a different branch. Those two cases are distinguishable, so
+      // they get different treatment.
       if (git.head && data.head_commit && git.head !== data.head_commit) {
-        questions.push(
-          `HEAD moved since STATE.md was written (${data.head_commit} → ${git.head}). Ask the human whether work landed elsewhere.`
-        );
+        if (git.anchor === 'advanced') {
+          const n = Number(git.ahead ?? 0);
+          out.push('');
+          out.push(
+            `[il] HEAD advanced${n ? ` ${n} commit(s)` : ''} past the STATE.md anchor ` +
+              `(${data.head_commit} -> ${git.head}). Normal after a finished task; ` +
+              `refresh head_commit next time you write STATE.md.`
+          );
+        } else {
+          questions.push(
+            `HEAD no longer contains the commit STATE.md anchored to (${data.head_commit} -> ${git.head}). ` +
+              `That is a rewind, a rebase or a different branch, not a normal advance. Ask the human ` +
+              `what happened before building on it.`
+          );
+        }
       }
     }
 
@@ -2486,6 +3010,7 @@ const SPELLINGS = {
     design: '/il:design', 'new': '/il:new <goal>', status: '/il:status',
     verify: '/il:verify', next: '/il:next', help: '/il:help',
     onboard: '/il:onboard', doctor: '/il:doctor',
+    delta: '/il:delta', preflight: '/il:preflight',
   },
   codex: {
     approve: 'il approve', 'approve-despite': 'il approve despite-review',
@@ -2493,6 +3018,7 @@ const SPELLINGS = {
     design: '$il-console design', 'new': '$il-spec', status: '$il-console status',
     verify: '$il-verify', next: '$il-execute', help: '$il-console help',
     onboard: '$il-onboard', doctor: '$il-console doctor',
+    delta: '$il-console delta', preflight: '$il-console preflight',
   },
 };
 
@@ -2585,6 +3111,38 @@ const CRITIC_AGENT = 'il-spec-critic';
  */
 const CRITERIA_AGENT = 'il-criteria';
 
+/**
+ * The three judgement agents, under whatever name the host happened to send.
+ *
+ * Claude Code attests `agent_type` from its own registry, so the value is exact
+ * and this map never has to do anything. Codex does not: `spawn_agent` takes the
+ * type as a model-supplied argument, and its canonical task names cannot contain
+ * the hyphen the registry name has. On a real run that meant a verifier which had
+ * finished its work could not record the verdict it had reached, because the
+ * string it sent was `verifier` and the string the hook wanted was `il-verifier`.
+ *
+ * Normalising here is not a weakening. Where the identity is attested it is
+ * already exact; where it is not, it was never a credential in the first place —
+ * the signed, expiring, bounded grant is what authorises the write, and this map only
+ * decides which set of restrictions an agent falls under. Getting that wrong in
+ * the other direction is worse: an unrecognised name means NO restriction, so a
+ * Codex task called `verifier` could write source that `il-verifier` could not.
+ */
+const AGENT_ALIASES = new Map();
+for (const canon of [VERIFIER_AGENT, CRITIC_AGENT, CRITERIA_AGENT]) {
+  const bare = canon.replace(/^il-/, '');
+  for (const alias of [canon, bare, `il_${bare}`, `il ${bare}`, `il.${bare}`, `il:${bare}`]) {
+    AGENT_ALIASES.set(alias.toLowerCase().replace(/[^a-z]/g, ''), canon);
+  }
+}
+
+/** @returns {string} the canonical agent name, or the input unchanged. */
+export function canonicalAgent(name) {
+  const raw = String(name ?? '').trim();
+  if (!raw) return '';
+  return AGENT_ALIASES.get(raw.toLowerCase().replace(/[^a-z]/g, '')) ?? raw;
+}
+
 /** Artifact -> the only agent allowed to write it. Everyone else is refused. */
 const OWNED_ARTIFACTS = [
   ['CRITERIA.md', CRITERIA_AGENT],
@@ -2651,7 +3209,7 @@ function onPreMcp(input, ctx) {
  * something actually looks gated.
  */
 function decideWrites(targets, denyTags, input, ctx) {
-  const agentType = agentIdentity(input, ctx.env);
+  const agentType = canonicalAgent(agentIdentity(input, ctx.env));
   const policy = loadPolicy(ctx.projectDir);
   const classifyCtx = { projectDir: ctx.projectDir, policy };
 
@@ -2724,8 +3282,14 @@ function decideWrites(targets, denyTags, input, ctx) {
   for (const t of targets) {
     const owned = ownedArtifactOf(t, ctx);
     if (owned && owned.owner !== agentType) {
+      // The grant is the Codex path (consumeJudgementGrant is inert elsewhere),
+      // and it deliberately does NOT require the caller to be anonymous. It used
+      // to, and that was the bug: a Codex verifier whose task name was `verifier`
+      // failed the name match above and then failed this test as well, so an
+      // agent that had done its work correctly could not record the verdict. On
+      // a host that does not attest identity the name was never the credential —
+      // the signed, expiring, single-purpose grant is.
       if (
-        !agentType &&
         targets.length === 1 &&
         denyTags.length === 0 &&
         consumeJudgementGrant(ctx, owned.name, owned.owner)
@@ -2820,7 +3384,7 @@ const IN_PROGRESS_MARKERS = [
   ['bisect', 'BISECT_LOG'],
 ];
 
-export function gitInfo(projectDir) {
+export function gitInfo(projectDir, anchorCommit = null) {
   const run = (args) => {
     try {
       return execFileSync('git', args, {
@@ -2837,7 +3401,7 @@ export function gitInfo(projectDir) {
   };
 
   const top = run(['rev-parse', '--show-toplevel']);
-  if (top === null) return { isRepo: false, dirty: [], head: null, op: null };
+  if (top === null) return { isRepo: false, dirty: [], head: null, op: null, anchor: null, ahead: null };
 
   const porcelain = run(['status', '--porcelain=v1']) ?? '';
   const dirty = porcelain
@@ -2854,7 +3418,32 @@ export function gitInfo(projectDir) {
     }
   }
 
-  return { isRepo: true, dirty, head: run(['rev-parse', '--short', 'HEAD']), op };
+  const head = run(['rev-parse', '--short', 'HEAD']);
+
+  // Ancestry, not equality. A normal task ends in a commit, so "HEAD != anchor"
+  // is the expected state most of the time and is not on its own a reason to
+  // stop and ask. Whether HEAD still CONTAINS the anchor is the question that
+  // separates a finished task from a rewind. `--is-ancestor` exits non-zero for
+  // "no", which run() reports as null, so a missing anchor and a real
+  // divergence are told apart by checking the commit resolves at all first.
+  let anchor = null;
+  let ahead = null;
+  const want = typeof anchorCommit === 'string' ? anchorCommit.trim() : '';
+  if (head && want && /^[0-9a-f]{4,40}$/i.test(want)) {
+    if (run(['rev-parse', '--verify', '--quiet', `${want}^{commit}`]) === null) {
+      anchor = 'unknown'; // the anchor is not a commit in this repo at all
+    } else if (head === want) {
+      anchor = 'same';
+    } else if (run(['merge-base', '--is-ancestor', want, 'HEAD']) !== null) {
+      anchor = 'advanced';
+      const n = run(['rev-list', '--count', `${want}..HEAD`]);
+      ahead = n === null ? null : Number(n);
+    } else {
+      anchor = 'diverged';
+    }
+  }
+
+  return { isRepo: true, dirty, head, op, anchor, ahead };
 }
 
 function loadState(projectDir, feature) {
@@ -2887,18 +3476,63 @@ function markAskedDirty(home, pid, sessionId) {
   }
 }
 
+function artifactObservationPath(home, pid) {
+  return join(storeDir(home, pid), 'artifact-observations.json');
+}
+
+/** Record one sighting per session and return candidates seen in 2+ sessions. */
+export function observeArtifactCandidates(home, pid, sessionId, paths) {
+  const session = /^[A-Za-z0-9._-]+$/.test(String(sessionId ?? '')) ? String(sessionId) : '';
+  if (!session) return [];
+  const file = artifactObservationPath(home, pid);
+  const data = readJsonSafe(file) ?? { candidates: {} };
+  if (!data.candidates || typeof data.candidates !== 'object') data.candidates = {};
+  for (const raw of Array.isArray(paths) ? paths : []) {
+    const glob = artifactCandidateGlob(raw);
+    if (!glob) continue;
+    const item = data.candidates[glob] ?? { sessions: [], examples: [] };
+    if (!item.sessions.includes(session)) item.sessions.push(session);
+    if (!item.examples.includes(raw)) item.examples.push(raw);
+    item.sessions = item.sessions.slice(-8);
+    item.examples = item.examples.slice(-4);
+    data.candidates[glob] = item;
+  }
+  try {
+    if (ensureDir(dirOf(file))) writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+  } catch {
+    /* diagnostic only; inability to remember must never affect resume safety */
+  }
+  const current = new Set((Array.isArray(paths) ? paths : []).map(artifactCandidateGlob).filter(Boolean));
+  return Object.entries(data.candidates)
+    .filter(([glob, item]) => current.has(glob) && Array.isArray(item?.sessions) && item.sessions.length >= 2)
+    .map(([glob, item]) => ({ glob, sessions: item.sessions.length, example: item.examples?.[0] ?? glob }))
+    .sort((a, b) => a.glob.localeCompare(b.glob));
+}
+
 function onSessionStart(input, ctx) {
   const state = loadState(ctx.projectDir, ctx.feature);
-  const git = ctx.feature ? gitInfo(ctx.projectDir) : { isRepo: false, dirty: [], head: null, op: null };
+  const git = ctx.feature
+    ? gitInfo(ctx.projectDir, state?.data?.head_commit ?? null)
+    : { isRepo: false, dirty: [], head: null, op: null, anchor: null, ahead: null };
   const gate = gateState(ctx);
   const pid = projectId(ctx.projectDir);
   const askedDirty = hasAskedDirty(ctx.home, pid, input?.session_id);
+  const artifacts = managedArtifactGlobs(loadPolicy(ctx.projectDir));
+  const partitioned = partitionDirty(git.dirty, artifacts);
+  const artifactSuggestions = observeArtifactCandidates(
+    ctx.home,
+    pid,
+    input?.session_id,
+    partitioned.source
+  );
 
   const text = composeSessionContext({
     feature: ctx.feature,
     state,
     git,
     gate,
+    artifacts,
+    artifactSuggestions,
     source: input?.source,
     askedDirty,
   });
@@ -2906,8 +3540,27 @@ function onSessionStart(input, ctx) {
 
   emit({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } });
 
-  if (!askedDirty && (git.dirty.length || git.op)) markAskedDirty(ctx.home, pid, input?.session_id);
+  // The question is what gets marked as asked, so only a real question counts.
+  // Marking on generated output alone spent the once-per-session flag on files
+  // the harness wrote itself, and the human never saw the question that mattered.
+  const { source } = partitioned;
+  if (!askedDirty && (source.length || git.op || git.anchor === 'diverged' || git.anchor === 'unknown')) {
+    markAskedDirty(ctx.home, pid, input?.session_id);
+  }
 }
+
+/** Paths the harness owns: `.interlocking/**` implicitly, plus policy.artifacts. */
+function managedArtifactGlobs(policy) {
+  const declared = Array.isArray(policy?.artifacts) ? policy.artifacts : [];
+  return [...BUILTIN_MANAGED_ARTIFACTS, ...declared.filter((g) => typeof g === 'string' && g)];
+}
+
+/**
+ * Generated by the harness itself, so never a resume hazard. Kept short on
+ * purpose: anything else a project treats as disposable has to be declared in
+ * `policy.artifacts`, because guessing wrong here loses someone's work.
+ */
+const BUILTIN_MANAGED_ARTIFACTS = ['**/.verify-packet*.md'];
 
 /**
  * `check` is what the approval screen is built from. It runs in the hook rather
@@ -3002,6 +3655,11 @@ function onVerifyPacket(_input, ctx) {
     );
   }
 
+  // Before the packet, not after the round. Both of the wasted verification
+  // rounds on the run that motivated this were answerable here in two seconds.
+  const pre = preflightReport(ctx, { brief: true });
+  if (pre.length) process.stdout.write(pre.join('\n') + '\n\n');
+
   const args = process.argv.slice(3);
   const range = args.find((a) => a.includes('..')) ?? 'HEAD';
   const explicit = args.filter((a) => /^REQ-\d+$/i.test(a)).map((a) => a.toUpperCase());
@@ -3046,6 +3704,266 @@ function onVerifyPacket(_input, ctx) {
 }
 
 /**
+ * Whether the executables a verification round needs can be found at all.
+ *
+ * Shallow on purpose: found or not found, nothing else. Reported as a list of
+ * facts rather than a verdict, because whether a missing program is fatal is a
+ * question about the criterion, not about the harness.
+ *
+ * Usage: node il.mjs preflight
+ */
+function onPreflight(_input, ctx) {
+  const out = [];
+  const lines = preflightReport(ctx);
+  out.push(...lines);
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+/** @returns {string[]} */
+function preflightReport(ctx, { brief = false } = {}) {
+  if (!ctx.feature) return ['interlocking: no active feature.'];
+  const work = join(ctx.projectDir, HARNESS_DIR, 'work', ctx.feature);
+  const criteria = readTextSafe(join(work, 'CRITERIA.md')) ?? '';
+  const policy = loadPolicy(ctx.projectDir);
+  const commands = Array.isArray(policy?.verify?.commands) ? policy.verify.commands : [];
+
+  const out = [];
+  const problems = [];
+
+  if (!commands.length) {
+    problems.push(
+      'policy.verify.commands is empty, so the verifier has no execution rights at all,\n' +
+        '    and every requirement it cannot settle by reading comes back INCONCLUSIVE.\n' +
+        `    Put the project's own test command in ${HARNESS_DIR}/policy.json first.`
+    );
+  }
+
+  const wanted = verifyExecutables(commands, criteria);
+  const missing = [];
+  const found = [];
+  for (const w of wanted) {
+    (resolveExecutable(w.exe, ctx.projectDir) ? found : missing).push(w);
+  }
+
+  if (!brief) {
+    out.push(`[il] verification preflight — ${ctx.feature}`);
+    out.push('');
+    out.push(`  verify.commands  ${commands.length ? `${commands.length} declared` : 'EMPTY'}`);
+    out.push(`  executables      ${found.length} resolved, ${missing.length} not found`);
+    out.push('');
+  }
+
+  for (const m of missing) {
+    problems.push(
+      `"${m.exe}" (named by ${m.where}) is not on PATH and is not a file in the repository.`
+    );
+  }
+
+  if (!problems.length) {
+    out.push(
+      brief
+        ? ''
+        : '  Nothing here will stop the round. This says the programs can be launched, not that they pass.'
+    );
+    return out.filter((l) => l !== '');
+  }
+
+  out.push(brief ? '[il] preflight found problems that will cost you a whole round:' : '  Problems:');
+  out.push(...problems.map((p) => `  - ${p}`));
+  out.push('');
+  out.push('  Every one of these ends as BLOCKED for reasons that are not the code. Fix them');
+  out.push('  now: a repository-local program is named repository-relative in the criterion, and a');
+  out.push('  criterion that genuinely cannot run here should say so rather than be run and fail.');
+  out.push('  Changing a Method means amending CRITERIA.md, which re-opens the gate — which is');
+  out.push(`  exactly why this runs before the round rather than after it. ${cmd('delta')} will`);
+  out.push('  scope that amendment to the requirements it touches.');
+  return out;
+}
+
+/** On PATH, or a file in the repo. Nothing deeper — see the section note. */
+function resolveExecutable(exe, projectDir) {
+  const name = String(exe ?? '');
+  if (!name) return false;
+  const SEP = /[\\/]/;
+  if (SEP.test(name)) {
+    const rel = name.replace(/^[.][\\/]/, '');
+    const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat', '.ps1'] : [''];
+    for (const ext of exts) {
+      try {
+        if (existsSync(join(projectDir, rel + ext)) || existsSync(name + ext)) return true;
+      } catch {
+        /* unreadable is not found */
+      }
+    }
+    return false;
+  }
+  // A bare name has to come off PATH. The argument is whitelisted rather than
+  // quoted: this runs a shell, and a criterion Method is model-written text.
+  if (!/^[A-Za-z0-9._+-]+$/.test(name)) return false;
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('where', [name], { cwd: projectDir, timeout: 2000, windowsHide: true, stdio: 'ignore' });
+    } else {
+      execFileSync('sh', ['-c', 'command -v -- ' + name], { cwd: projectDir, timeout: 2000, stdio: 'ignore' });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What moved since the last human approval, and what that lets you narrow.
+ *
+ * Usage: node il.mjs delta
+ *
+ * Read-only. It changes no gate and grants nothing: its whole job is to replace
+ * "regenerate everything because something changed" with a list a human can
+ * check. The baseline is the signed approval record, so the answer cannot be
+ * talked into a wider reuse claim than the hashes support.
+ */
+function onDelta(_input, ctx) {
+  if (!ctx.feature) {
+    process.stdout.write('interlocking: no active feature.\n');
+    return;
+  }
+  const work = join(ctx.projectDir, HARNESS_DIR, 'work', ctx.feature);
+  const spec = readTextSafe(join(work, 'SPEC.md'));
+  if (spec === null) {
+    process.stdout.write(`SPEC.md not found at ${HARNESS_DIR}/work/${ctx.feature}/SPEC.md\n`);
+    return;
+  }
+  const criteria = readTextSafe(join(work, 'CRITERIA.md')) ?? '';
+  const d = deltaFor(ctx);
+
+  if (!d.available) {
+    process.stdout.write(
+      `[il] no scoped amendment available for ${ctx.feature}.\n` +
+        `     ${d.reason}\n` +
+        `     Every requirement is in scope: write criteria and review the whole pair.\n`
+    );
+    return;
+  }
+
+  const out = [];
+  out.push(`[il] delta for ${ctx.feature} against the approval of ${String(d.prior.granted_at ?? '').slice(0, 10)} (spec ${String(d.prior.spec_hash ?? '').slice(0, 8)})`);
+  out.push('');
+  if (d.added.length) out.push(`  added      ${summarizeIds(d.added, 8)}`);
+  if (d.changed.length) out.push(`  changed    ${summarizeIds(d.changed, 8)}`);
+  if (d.removed.length) out.push(`  removed    ${summarizeIds(d.removed, 8)}`);
+  if (d.criteriaChanged.length) out.push(`  criterion moved  ${summarizeIds(d.criteriaChanged, 8)}`);
+  out.push(`  unchanged  ${summarizeIds(d.carried, 8)}`);
+  out.push('');
+
+  if (!d.needReview.length) {
+    out.push('  Nothing moved. The approval that is open already covers this pair.');
+    process.stdout.write(out.join('\n') + '\n');
+    return;
+  }
+
+  out.push(`  Scope: ${d.needReview.length} of ${d.needReview.length + d.carried.length} requirement(s).`);
+  out.push('');
+  out.push('  Scoped regeneration — review the pair with the critic told where the change is:');
+  if (d.needCriteria.length) {
+    out.push(`    node "${SELF_PATH}" criteria-packet --delta`);
+  } else {
+    out.push('    criteria regeneration is not needed — no requirement text was added or changed');
+  }
+  out.push(`    node "${SELF_PATH}" review-packet --delta`);
+  out.push('');
+  out.push('  What this does and does not buy:');
+  out.push(`    · ${d.carried.length} requirement(s) are byte-identical to what the human already`);
+  out.push('      approved, so re-deriving their criteria cannot change them — only');
+  out.push('      damage them. The critic still reads the whole pair; it is told which');
+  out.push('      part is new so its findings land there.');
+  out.push('    · The approval still binds BOTH whole-document hashes, and a human still');
+  out.push('      types the keystrokes. Nothing here opens a gate.');
+  out.push('    · Drop --delta for a full re-derivation. Prefer it when the amendment');
+  out.push('      changes a shared assumption rather than one requirement.');
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+/**
+ * `--delta` on a packet command, resolved against the signed approval record.
+ *
+ * Returns no scope at all unless a valid prior approval carries per-requirement
+ * hashes AND something actually moved. The refusals are deliberate: a scope the
+ * store cannot substantiate is a reuse claim, and a reuse claim from the same
+ * session that wants the work to be smaller is worth nothing.
+ *
+ * @param {'criteria'|'review'} kind
+ * @returns {{scope: string[]|null, carried: string[], carriedFrom: string, note: string, skip: boolean}}
+ */
+function scopedRun(ctx, kind) {
+  const none = { scope: null, carried: [], carriedFrom: '', note: '', skip: false };
+  if (!process.argv.slice(3).includes('--delta')) return none;
+
+  const d = deltaFor(ctx);
+  if (!d.available) {
+    return { ...none, note: `[il] --delta ignored: ${d.reason} Deriving the whole document.\n\n` };
+  }
+  const scope = kind === 'criteria' ? d.needCriteria : d.needReview;
+  if (!scope.length) {
+    if (kind === 'criteria' && d.needReview.length) {
+      return {
+        ...none,
+        skip: true,
+        note:
+          '[il] no criteria regeneration needed: no requirement text was added or changed.\n' +
+          '     Keep CRITERIA.md as amended and run review-packet --delta.\n',
+      };
+    }
+    return {
+      ...none,
+      note:
+        `[il] --delta ignored: nothing has moved since the approval of ` +
+        `${String(d.prior.granted_at ?? '').slice(0, 10)}. Deriving the whole document.\n\n`,
+    };
+  }
+  const carried = kind === 'criteria' ? d.unchanged.filter((id) => !scope.includes(id)) : d.carried;
+  return {
+    scope,
+    carried,
+    carriedFrom: String(d.prior.spec_hash ?? ''),
+    note:
+      `[il] scoped to ${scope.length} of ${scope.length + carried.length} requirement(s): ` +
+      `${summarizeIds(scope, 8)}. ${carried.length} carried unchanged from spec ` +
+      `${String(d.prior.spec_hash ?? '').slice(0, 8)}.\n\n`,
+  };
+}
+
+/**
+ * The delta plus the baseline it came from, or why there is none.
+ * @returns {{available:boolean, reason?:string, prior?:object} & ReturnType<typeof computeDelta>}
+ */
+function deltaFor(ctx) {
+  const none = (reason) => ({ ...computeDelta(null, '', ''), available: false, reason });
+  if (!ctx.feature) return none('No active feature.');
+  const key = loadKey(ctx.home);
+  if (!key) return none('The approval store is unavailable, so there is no signed baseline.');
+  const pid = projectId(ctx.projectDir);
+  const prior = readApproval(ctx.home, pid, ctx.feature, 'G0');
+  if (!prior) return none('This feature has never been approved, so there is nothing to carry forward.');
+  if (!verifyToken(key, prior)) return none('The stored approval failed its signature check — treat this as tampering, not as a delta.');
+  if (!prior.req_digest) {
+    return none('The stored approval predates per-requirement hashes, so reuse cannot be checked. Approve once more and the next amendment can be scoped.');
+  }
+  if (!prior.shared_digest) {
+    return none('The stored approval predates shared normative hashes, so scoped reuse cannot be checked. Review the whole pair once; the next local amendment can be scoped.');
+  }
+  const work = join(ctx.projectDir, HARNESS_DIR, 'work', ctx.feature);
+  const spec = readTextSafe(join(work, 'SPEC.md'));
+  if (spec === null) return none('SPEC.md is missing or unreadable.');
+  const criteria = readTextSafe(join(work, 'CRITERIA.md')) ?? '';
+  const d = computeDelta(prior, spec, criteria);
+  if (d.globalChanged) {
+    return none('Shared normative context changed (threat model, assumptions, vocabulary, or common model). Every requirement requires fresh criteria and full review.');
+  }
+  if (!d.available) return none('The current SPEC.md has no parseable requirements to compare.');
+  return { ...d, prior, reason: '' };
+}
+
+/**
  * The prompt that sends il-criteria to write the yardstick.
  *
  * Printed rather than written to a file: unlike the verify packet, there is no
@@ -3064,7 +3982,15 @@ function onCriteriaPacket(_input, ctx) {
     process.stdout.write(`SPEC.md not found at ${HARNESS_DIR}/work/${ctx.feature}/SPEC.md\n`);
     return;
   }
-  const packet = composeCriteriaPacket({ feature: ctx.feature, spec });
+  const scoped = scopedRun(ctx, 'criteria');
+  if (scoped.note) process.stdout.write(scoped.note);
+  if (scoped.skip) return;
+  const packet = composeCriteriaPacket({
+    feature: ctx.feature,
+    spec,
+    scope: scoped.scope,
+    carried: scoped.carried,
+  });
   armJudgementGrant(ctx, 'CRITERIA.md', CRITERIA_AGENT);
   process.stdout.write(
     (packet || 'the criteria packet could not be built from this SPEC.md') + '\n'
@@ -3099,7 +4025,16 @@ function onReviewPacket(_input, ctx) {
     );
     return;
   }
-  const packet = composeReviewPacket({ feature: ctx.feature, spec, criteria });
+  const scoped = scopedRun(ctx, 'review');
+  if (scoped.note) process.stdout.write(scoped.note);
+  const packet = composeReviewPacket({
+    feature: ctx.feature,
+    spec,
+    criteria,
+    scope: scoped.scope,
+    carried: scoped.carried,
+    carriedFrom: scoped.carriedFrom,
+  });
   armJudgementGrant(ctx, 'REVIEW.md', CRITIC_AGENT);
   process.stdout.write((packet || 'the review packet could not be built') + '\n');
 }
@@ -3191,7 +4126,7 @@ function onDoctor(_input, ctx) {
     out.push('  ✓ human-only approval    UserPromptSubmit carries the literal prompt');
     out.push('  ✓ resume                 SessionStart injects the anchor the same way');
     out.push('  ✗ agent attestation      Codex does not send an attested agent_type. Building a');
-    out.push('                           fixed packet arms one 10-minute, single-use write to its');
+    out.push('                           fixed packet arms a 30-minute, bounded write to its');
     out.push('                           judgement file. This is a capability convention, not an');
     out.push('                           identity guarantee; context isolation still holds.');
     out.push('  · hooks need trusting    Codex asks once, in the TUI. Until you accept, hooks are');
@@ -3236,8 +4171,24 @@ export function composeHelp(ctx) {
     const claims = Array.isArray(data.gates_passed) ? data.gates_passed : [];
     if (claims.includes('G0') && !open) {
       warn.push(
-        '⚠ STATE.md claims G0 is passed, but no valid approval backs it.',
+        `⚠ STATE.md claims G0 is passed; the signed store says: ${gate.why ?? 'no approval'}`,
+        `  ${mirrorAdvice(gate.why)}`,
         '  STATE.md is a mirror, never the authority. Edits stay blocked.'
+      );
+    }
+    // An amendment is the common reason a closed gate is not alarming, and the
+    // one case where the next step is cheaper than starting over. The mirror
+    // warning above already carries this advice when it fires, and printing the
+    // same command twice on a screen whose whole contract is "at most three
+    // things to do" is how that contract erodes.
+    if (!open && ctx?.amendment?.moved && !warn.length) {
+      warn.push(
+        `· amendment: ${ctx.amendment.moved} requirement(s) moved, ${ctx.amendment.carried} carry forward —`,
+        `  ${cmd('delta')} scopes the re-derivation to what actually changed.`
+      );
+    } else if (!open && ctx?.amendment?.moved) {
+      warn.push(
+        `  (${ctx.amendment.moved} requirement(s) moved, ${ctx.amendment.carried} carry forward unchanged.)`
       );
     }
     if (gate.degraded) {
@@ -3328,11 +4279,19 @@ export function composeHelp(ctx) {
  * cannot drift from what is actually enforced.
  */
 function onHelp(_input, ctx) {
+  const gate = gateState(ctx);
+  // Only worth computing when the gate is shut: an open gate has no amendment to
+  // scope, and this reads the signed store plus both documents.
+  const d = gate.open ? null : deltaFor(ctx);
   process.stdout.write(
     composeHelp({
       feature: ctx.feature,
-      gate: gateState(ctx),
+      gate,
       state: loadState(ctx.projectDir, ctx.feature),
+      amendment:
+        d && d.available && d.needReview.length
+          ? { moved: d.needReview.length, carried: d.carried.length }
+          : null,
     }) + '\n'
   );
 }
@@ -3357,7 +4316,7 @@ function onStatus(_input, ctx) {
     lines.push(`gate      ${gate.open ? 'OPEN' : 'CLOSED'} — ${gate.why}${gate.degraded ? ' (advisory mode)' : ''}`);
     const claims = Array.isArray(d.gates_passed) ? d.gates_passed : [];
     if (claims.includes('G0') && !gate.open) {
-      lines.push('          ⚠ STATE.md claims G0 but no valid approval backs it (mirror, not authority)');
+      lines.push(`          ⚠ STATE.md claims G0; the store says: ${gate.why} (mirror, not authority)`);
     }
     lines.push(`next      ${d.next_action ?? '(unrecorded)'}`);
     if (d.blocked_on) lines.push(`blocked   ${d.blocked_on}`);
@@ -3610,6 +4569,14 @@ function handleApprove(directive, ctx, pid, feature, session) {
   }
 
   const policy = loadPolicy(ctx.projectDir);
+
+  // Read the outgoing approval BEFORE it is overwritten. It is the only
+  // trustworthy answer to "what did the last human approval actually cover?",
+  // and the delta computed against it is what the note below reports.
+  const prior = readApproval(ctx.home, pid, feature, directive.gate);
+  const priorValid = Boolean(prior && verifyToken(loadKey(ctx.home), prior));
+  const delta = priorValid ? computeDelta(prior, spec, criteria ?? '') : computeDelta(null, spec, '');
+
   const token = {
     v: 1,
     gate: directive.gate,
@@ -3618,8 +4585,16 @@ function handleApprove(directive, ctx, pid, feature, session) {
     spec_hash: hash,
     criteria_path: `${HARNESS_DIR}/work/${feature}/CRITERIA.md`,
     criteria_hash: criteriaHash,
+    // Per-requirement hashes. The whole-document hashes above are what the gate
+    // enforces; these are what lets the NEXT amendment be scoped honestly
+    // instead of on the model's word. See § delta.
+    req_digest: requirementDigest(spec),
+    shared_digest: sharedNormativeDigest(spec),
+    criteria_digest: criteriaDigest(criteria ?? ''),
     policy_hash: sha256hex(JSON.stringify(policy)),
     review_overruled: Boolean(reviewProblem),
+    carried_from: delta.available && delta.carried.length ? prior.spec_hash : null,
+    carried_reqs: delta.available ? delta.carried : [],
     granted_at: new Date().toISOString(),
     granted_in_session: session,
   };
@@ -3656,8 +4631,20 @@ function handleApprove(directive, ctx, pid, feature, session) {
     ? `\n     ⚠ Approved over the critic: ${reviewProblem.human}`
     : '';
 
+  // An amendment is the common case after the first approval, and the thing the
+  // human cannot see from a hash is how much of what they are approving is the
+  // same text they already approved. Say it in requirements, not in bytes.
+  const deltaNote =
+    delta.available && (delta.carried.length || delta.needReview.length)
+      ? `\n     Amendment: ${delta.needReview.length} requirement(s) moved since the ` +
+        `approval of ${String(prior.granted_at ?? '').slice(0, 10)} (${summarizeIds(delta.needReview)}); ` +
+        `${delta.carried.length} unchanged and carried forward` +
+        (delta.removed.length ? `; ${delta.removed.length} removed` : '') +
+        '.'
+      : '';
+
   tellBoth(
-    `[il] ${directive.gate} approved — ${feature} (spec ${hash.slice(0, 8)}, criteria ${criteriaHash.slice(0, 8)}). Code edits unlocked.${overruleNote}${warnNote}`,
+    `[il] ${directive.gate} approved — ${feature} (spec ${hash.slice(0, 8)}, criteria ${criteriaHash.slice(0, 8)}). Code edits unlocked.${overruleNote}${deltaNote}${warnNote}`,
     `[il] ${directive.gate} approved for ${feature}, spec ${hash.slice(0, 8)}, criteria ${criteriaHash.slice(0, 8)}. ` +
       `Code edits are unlocked.\n` +
       `Update ${HARNESS_DIR}/work/${feature}/STATE.md: set gates_passed to include ${directive.gate}, ` +
@@ -3778,6 +4765,8 @@ const DISPATCH = {
   check: onCheck,
   brief: onBrief,
   doctor: onDoctor,
+  delta: onDelta,
+  preflight: onPreflight,
   'criteria-packet': onCriteriaPacket,
   'review-packet': onReviewPacket,
   'verify-packet': onVerifyPacket,
@@ -3790,6 +4779,8 @@ const CLI_MODES = new Set([
   'check',
   'brief',
   'doctor',
+  'delta',
+  'preflight',
   'criteria-packet',
   'review-packet',
   'verify-packet',

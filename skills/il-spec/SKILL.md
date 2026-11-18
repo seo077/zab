@@ -65,6 +65,46 @@ remains auditable: `small: <outcome>; check: <command or observation>`. The huma
 still opens the override; the model cannot do so itself. Without an active feature,
 put the same outcome and check in the commit or final report instead.
 
+### Where does this actually get used?
+
+Ask this at intake, before research, and write the answer into `SPEC.md`. It costs
+one line and it decides whether the acceptance criteria are worth anything.
+
+If the answer is "a library", "a CLI", "a test suite" — the thing that runs the
+code and the thing the user touches are the same thing, and the ordinary path is
+fine.
+
+If the answer is **a browser, a phone, a deployed URL, a packaged binary, a
+device** — they are not the same thing, and a criterion satisfied by the local
+build is evidence about the local build only. That gap is not hypothetical. On the
+run that produced this rule, a feature passed every headless test, passed
+independent verification with 11 of 11 requirements PASS, was declared complete —
+and the user opened the deployed site to find mojibake where the Korean text
+should be, a mouse drag that did nothing, and a turn that never ended. It was
+declared complete, and reopened by a real defect, three more times after that.
+
+So when the delivery surface differs from the test surface, the spec needs
+requirements about the delivered thing, written **before the first G0**:
+
+- **real input** on the real surface — an actual pointer or key event through the
+  actual runtime, not a function called with the arguments a pointer would have
+  produced
+- **rendered text**, checked as pixels or as the runtime's own missing-glyph
+  telemetry. A string that is correct in the source and broken on screen passes
+  every string comparison ever written
+- **a whole lifecycle**, start to finish — the failures that survive unit tests
+  are the ones where each step works and the sequence stalls
+- **provenance**: the deployed bytes tied to the source commit they came from, so
+  "it works" and "it works in the build you are looking at" are the same claim
+- **the local/deployed difference itself**, checked rather than assumed
+
+Retrofitting these after G0 costs an amendment, a criteria regeneration, a review
+and an approval — the exact loop §10 exists to bound. Asking one question at
+intake costs a line.
+
+If the human declines the deployed-surface requirements, that is their call: record
+it as an assumption so the approval screen shows what verification will not cover.
+
 ### If it is an epic
 
 Do not write one giant spec. Propose a decomposition and let the human choose:
@@ -207,11 +247,13 @@ mistake". If it did, that is a finding for the human, not an edit for you.
 a `!` block — `$il-console` explains how to resolve the path once. Spawn the agent
 with `spawn_agent`, `fork_turns="none"` (anything else hands it your conversation,
 which is the one thing the packet is designed to withhold). Building the packet
-arms one short-lived, single-use write to `CRITERIA.md`; Codex's `spawn_agent`
-has no per-agent environment parameter. Codex does not attest agent identity, so
-possession of that grant is a convention rather than a lock — say so if the human
-asks how airtight this is. If the write fails, rebuild the packet for a fresh
-grant; never write the file in the main session.
+arms a short-lived write capability for `CRITERIA.md` — a small budget of tool
+calls rather than exactly one, because replacing a file is a delete and then an
+add, and a one-use grant was spent by the delete. Codex's `spawn_agent` has no
+per-agent environment parameter, so none is needed. Codex does not attest agent
+identity, so possession of that grant is a convention rather than a lock — say so
+if the human asks how airtight this is. If the write fails, rebuild the packet for
+a fresh grant; never write the file in the main session.
 
 
 Take back the three lines. Do not pull the file into this context to review it;
@@ -271,10 +313,11 @@ that does not settle it is invisible from inside either document alone.
 a `!` block — `$il-console` explains how to resolve the path once. Spawn the agent
 with `spawn_agent`, `fork_turns="none"` (anything else hands it your conversation,
 which is the one thing the packet is designed to withhold). Building the packet
-arms one short-lived, single-use write to `REVIEW.md`; no per-agent environment
-variable is needed. Codex does not attest agent identity, so possession of that
-grant is a convention rather than a lock — say so if the human asks how airtight
-this is. If the write fails, rebuild the packet for a fresh grant.
+arms a short-lived write capability for `REVIEW.md` — a small budget of tool
+calls rather than exactly one, so a replace or a single retry lands; no per-agent
+environment variable is needed. Codex does not attest agent identity, so
+possession of that grant is a convention rather than a lock — say so if the human
+asks how airtight this is. If the write fails, rebuild the packet for a fresh grant.
 
 
 It writes its verdict to `REVIEW.md`, which is **Gate 1**:
@@ -340,3 +383,67 @@ If there are `✗` blocking findings, fix the spec and re-present. Asking a huma
 approve something you already know the gate will refuse wastes their attention.
 
 After a real approval lands, the hook tells you so. Only then update `STATE.md`.
+
+---
+
+## 10 · Amending a spec that has already been approved
+
+Editing `SPEC.md` or `CRITERIA.md` closes G0. That is correct and it does not
+change: the approval binds to both documents, and nothing may move underneath it.
+
+What used to happen next was not correct. A two-line amendment to *how* one
+requirement is verified sent every requirement in the feature back through
+`il-criteria`, back through the critic, and back to the human — and because each
+full re-review surfaced unrelated findings in requirements nobody had touched, one
+verification-contract change on a real run cost four rounds and four approvals.
+The human's verdict on that experience was that the loop was too slow, and they
+were right.
+
+So: **the gate is unchanged, and the scope of the re-derivation is not.**
+
+Start by asking what actually moved:
+
+```
+!`node "${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs" delta`
+```
+
+It compares the current documents against the **signed approval record**, not
+against anything in the repo, and reports which requirements changed, which were
+added or removed, which criteria moved, and which requirements are byte-identical
+to what the human already approved. If there is no valid prior approval, or the
+record predates per-requirement hashes, it says so and refuses to scope anything —
+that refusal is the point. A reuse claim the store cannot substantiate is worth
+nothing, least of all coming from the session that would prefer less work.
+
+When it does produce a scope, pass `--delta` to both packet commands:
+
+```
+!`node "${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs" criteria-packet --delta`
+!`node "${CLAUDE_PLUGIN_ROOT}/hooks/il.mjs" review-packet --delta`
+```
+
+- `il-criteria` is asked to write criteria for the moved requirements and to carry
+  the rest through unchanged. It still writes the whole file, because that is the
+  only path it may write. If it alters a carried entry, the next `delta` detects
+  it and that requirement re-enters review — the scoping is checked, not trusted.
+- `il-spec-critic` still reads **both documents whole**. Only its attention is
+  directed, and the packet tells it in as many words that a finding outside the
+  scope is still a finding. Narrowing what a critic reads would be the wrong
+  saving: a criterion is only judgeable against the requirements around it, and an
+  amendment that breaks a neighbour is exactly what the critic is for.
+
+Everything else is unchanged. The human still types the keystrokes. The approval
+still binds both whole-document hashes. The approval screen names how many
+requirements moved and how many carried, so the assurance difference is something
+they read rather than something you decided for them.
+
+**Use the full path — no `--delta` — when the amendment changes something shared.**
+A new threat, a changed vocabulary, a decision reversed, a data model altered: the
+requirements that did not move textually may still have stopped meaning what they
+meant. `--delta` is for a change that is genuinely local to the requirements it
+touches. When you are not sure, that uncertainty is the answer: run the full path
+and say why in the history line.
+
+Record in `STATE.md` history which path you took and what carried. "Amended
+REQ-014; 15 requirements carried from the approval of 2026-08-25" is a sentence
+someone can check. "Regenerated criteria" is not.

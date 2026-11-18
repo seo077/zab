@@ -21,7 +21,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { composeVerifyPacket, verifierFor, routeRequirements, DEFAULT_POLICY } from '../hooks/il.mjs';
+import {
+  composeVerifyPacket,
+  verifierFor,
+  routeRequirements,
+  DEFAULT_POLICY,
+  projectId,
+} from '../hooks/il.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'il.mjs');
 
@@ -217,7 +223,7 @@ test('the packet is written to disk, so any tool can be handed the same input', 
   assert.match(r.stdout, /\.verify-packet\.md/, 'the path is reported so a skill can pass it on');
 });
 
-test('Codex packet grants one write without a per-agent environment variable', () => {
+test('Codex packet grants a bounded number of writes, then refuses', () => {
   const env = project();
   const packet = runCodex('criteria-packet', [], env, '');
   assert.equal(packet.status, 0, packet.stderr);
@@ -228,10 +234,64 @@ test('Codex packet grants one write without a per-agent environment variable', (
     tool_name: 'Write',
     tool_input: { file_path: target },
   });
-  const first = runCodex('pre-write', [], env, input);
-  assert.equal(denied(first), false, first.stdout);
-  const second = runCodex('pre-write', [], env, input);
-  assert.equal(denied(second), true, 'the capability must be single-use');
+
+  // Replacing a judgement file is a delete and then an add, and a retry after a
+  // failed write is two more. One use meant a verifier that had reached a
+  // verdict could not record it. The budget is small and it still runs out.
+  const grant = JSON.parse(
+    readFileSync(
+      join(env.home, 'projects', projectId(env.dir), 'judgement-grants', 'CRITERIA.md.json'),
+      'utf8'
+    )
+  );
+  assert.ok(grant.max_uses >= 2, 'a replace is at least two tool calls');
+
+  for (let i = 0; i < grant.max_uses; i++) {
+    assert.equal(denied(runCodex('pre-write', [], env, input)), false, `use ${i + 1} must be allowed`);
+  }
+  assert.equal(
+    denied(runCodex('pre-write', [], env, input)),
+    true,
+    'the capability must run out — a budget, not a mode'
+  );
+});
+
+test('a Codex agent whose task name is not the registry name still spends the grant', () => {
+  const env = project();
+  assert.equal(runCodex('criteria-packet', [], env, '').status, 0);
+
+  // Codex canonical task names cannot carry the hyphen the registry name has, so
+  // the value that arrives is `verifier`, not `il-verifier`. This exact mismatch
+  // stopped a finished verifier from recording a verdict on a real run.
+  const target = join(env.dir, '.interlocking', 'work', '001-login', 'CRITERIA.md');
+  const r = runCodex(
+    'pre-write',
+    [],
+    env,
+    JSON.stringify({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Write',
+      agent_type: 'criteria',
+      tool_input: { file_path: target },
+    })
+  );
+  assert.equal(denied(r), false, r.stdout);
+});
+
+test('an unrecognised agent name still cannot write source under a claimed role', () => {
+  const env = project();
+  const r = runCodex(
+    'pre-write',
+    [],
+    env,
+    JSON.stringify({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Write',
+      agent_type: 'verifier',
+      tool_input: { file_path: join(env.dir, 'src', 'app.ts') },
+    })
+  );
+  assert.equal(denied(r), true, 'a near-miss name must land under the same restrictions');
 });
 
 test('Codex packet falls back to the project when the sandbox cannot write the external grant store', () => {
@@ -255,11 +315,15 @@ test('Codex packet falls back to the project when the sandbox cannot write the e
     tool_name: 'Write',
     tool_input: { file_path: target },
   });
-  const first = runCodex('pre-write', [], env, input);
-  assert.equal(denied(first), false, first.stdout);
-  assert.equal(existsSync(fallback), false, 'the fallback capability must be consumed');
-  const second = runCodex('pre-write', [], env, input);
-  assert.equal(denied(second), true, 'the fallback capability must remain single-use');
+  const max = JSON.parse(readFileSync(fallback, 'utf8')).max_uses;
+  for (let i = 0; i < max; i++) {
+    assert.equal(denied(runCodex('pre-write', [], env, input)), false, `fallback use ${i + 1}`);
+  }
+  assert.equal(
+    denied(runCodex('pre-write', [], env, input)),
+    true,
+    'the fallback capability runs out too'
+  );
 });
 
 test('Claude Code still requires attested agent identity', () => {
