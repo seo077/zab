@@ -11,7 +11,7 @@ The acceptance criteria are written first, a verifier that never saw the build c
 /zab:build     make it, check it, accept it
 ```
 
-> **Language note.** The commands and this guide are in English and Korean. The method itself — the role rules and verification criteria the agents read — is written in Korean, and the agents write their working records in Korean. See [What it costs](#what-it-costs).
+> **Language note.** The method — the role rules and verification criteria the agents read — is written in English, and so are the file names and the ledger. The agents talk to you and write their working records in the language you use. The Korean original of the method is kept at the tag `korean-v0.1`.
 
 ---
 
@@ -70,10 +70,10 @@ Creates the skeleton in the folder you have open. Run it once. **It never touche
 input/                  where materials go
 output/                 where results come out
 log/manifest.json       the Task ledger — what is in progress and how far
-log/실행로그.md          what was done, step by step
-log/AI 논의사항.md       decisions, and what you said, verbatim
+log/run-log.md          what was done, step by step
+log/decisions.md        decisions, and what you said, verbatim
 pipeline/               job definitions created in this project (empty at first)
-프로젝트지도.md          a one-page map of the project
+project-map.md          a one-page map of the project
 CLAUDE.md               project guide
 ```
 
@@ -90,7 +90,7 @@ Runs up to the point just **before** building. It builds nothing.
 | 3 | A | (only for jobs whose design must be settled first) writes a design document |
 | ★ | You | (only then) **Approve the design** |
 
-If you already know the kind of job, name it: `/zab:design 회로분석`.
+If you already know the kind of job, name it: `/zab:design circuit-analysis`.
 
 ### `/zab:build` — make it, check it, accept it
 
@@ -105,6 +105,10 @@ Starts from the approved spec and criteria. If the ledger has no record of the c
 | ★ | You | **Final acceptance** — read B's verdict in its own words and decide |
 
 You can close the session and come back. The Task board appears when you reopen, and running the same command reads the ledger and resumes where it stopped.
+
+### `/zab:migrate` — only for projects made by the Korean release
+
+Version 0.1 used Korean file names and ledger keys. In such a project the other commands only point here. `/zab:migrate` lists what would be renamed and changes nothing; `/zab:migrate apply` does it, keeps the old ledger as `log/manifest.ko.json`, and never overwrites a file. The text inside your records is left as it was written.
 
 ---
 
@@ -137,9 +141,8 @@ Stated plainly.
 
 - **It is slow.** Criteria first, three or four human checkpoints, checks run in fresh sessions. Even a small request goes through several steps.
 - **It uses a lot of tokens.** The role documents are long, and the verifier reads its rules from the top on every call.
-- **It enforces nothing.** There are two hooks: one shows the Task board when a session opens, one lets a session read the plugin's own documents without a permission prompt. Neither ever refuses anything. The rules are documents; if a model breaks one, nothing mechanical stops it.
+- **It enforces almost nothing.** There are three hooks: one shows the Task board when a session opens, one lets a session read the plugin's own documents without a permission prompt, and one checks who owns a file before it is written — the verifier's files are refused to everyone else, and the builder and verifier are refused the orchestrator's. That last one guards against slips, not intent: it does not see shell commands, and it fails open. Every other rule is a document; if a model breaks one, nothing mechanical stops it.
 - **It does not replace your checking.** Approve at a ★ without opening the file and the method is worth half as much.
-- **The method is written in Korean.** The role rules, the criteria and the records the agents write are Korean. The commands work in any language you type, but you will be reading Korean files at the checkpoints.
 - **Claude Code only.** Codex is not supported yet.
 
 ---
@@ -160,12 +163,12 @@ Requires Node 18 or later. Nothing else to install.
 
 | Pipeline | For |
 |---|---|
-| **범용** (general) | Work with no fixed shape. Code starts here |
-| **회로분석** (circuit analysis) | Reading a schematic module by module, analysing it, and diagnosing errors, risks and improvements |
-| **엑셀작업** (spreadsheet work) | Spreadsheet work in two stages, layout then output, without modifying the original |
-| **파이프라인신설** (new pipeline) | Making a pipeline for a new kind of job you will repeat |
+| **general** | Work with no fixed shape. Code starts here |
+| **circuit-analysis** | Reading a schematic module by module, analysing it, and diagnosing errors, risks and improvements |
+| **spreadsheet** | Spreadsheet work in two stages, layout then output, without modifying the original |
+| **new-pipeline** | Making a pipeline for a new kind of job you will repeat |
 
-The knowledge that changes with the kind of job is attached separately. Pick circuit analysis and A reads the circuit-analysis rules and references while B reads the circuit-analysis criteria. When you find yourself repeating a kind of work, run **파이프라인신설** once to create its definition; what it creates lands in your project's `pipeline/` folder.
+The knowledge that changes with the kind of job is attached separately. Pick circuit analysis and A reads the circuit-analysis rules and references while B reads the circuit-analysis criteria. When you find yourself repeating a kind of work, run **new-pipeline** once to create its definition; what it creates lands in your project's `pipeline/` folder.
 
 ## Where things live
 
@@ -173,22 +176,34 @@ The role documents and job definitions exist **once, inside the plugin**. A proj
 
 ```
 plugin                               project
-├─ pipeline/                         ├─ CLAUDE.md · 프로젝트지도.md
+├─ pipeline/                         ├─ CLAUDE.md · project-map.md
 │  ├─ z/  Z's rules · definitions     ├─ input/      materials
 │  ├─ a/  A's rules · per-job notes   ├─ output/     results
 │  └─ b/  B's rules · criteria        ├─ pipeline/   definitions made in this project
 ├─ templates/project/                └─ log/
 ├─ commands/  setup · design · build     ├─ manifest.json    the Task ledger
-├─ agents/    a · b                      ├─ 실행로그.md · AI 논의사항.md
+├─ agents/    a · b                      ├─ run-log.md · decisions.md
 └─ scripts/                              └─ T1_<name>/       everything about one Task
                                              criteria · build notes · verdicts · call messages
 ```
 
 - One run of a job is **one Task** (`T1`, `T2`, …). Fixing and redoing is not a new Task but a repeat inside the same one (`R2`, `R3`).
 - **Every file has one owner.** Only Z writes the ledger and shared logs, only A writes results, only B writes criteria and verdicts.
-- The plugin's `pipeline/` is read-only. If a definition you made in a project proves useful more than once, send it here as a pull request.
+- The plugin's `pipeline/` is read-only, and an update replaces it. What your work teaches is written to your own layer, outside the plugin and outside any one project.
 
-The whole method is in [pipeline/README.md](pipeline/README.md); paths and command boundaries for the plugin are in [pipeline/z/플러그인운용.md](pipeline/z/플러그인운용.md).
+### It learns from your work, and keeps it
+
+A run leaves more than a result. Preferences you stated at a checkpoint, a pitfall the verifier hit, a kind of job you ended up defining — these are written down as files, in the same shape as the plugin's own rules, **in a folder of your own**: `~/.zab/pipeline/`. Nothing to run and nothing to copy. The next project you open, in any folder, starts with them, and a plugin update does not touch them.
+
+| Layer | Where | Read by | Written |
+|---|---|---|---|
+| Project | `pipeline/` in the project | this project | only when you say "for this project only" |
+| **Yours** | `~/.zab/pipeline/` | every project you open | by default, as you work |
+| Plugin | inside the plugin | everyone | never — it is the shipped baseline |
+
+The nearer layer wins, so your own track replaces the shipped one of the same name. When a Task closes, Z lists the files it added to your layer; they are plain files, and deleting one undoes it. The role rules themselves — who may judge, what the verifier may be told — are not layered; they stay as shipped. If something of yours should reach everyone, send it here as a pull request.
+
+The whole method is in [pipeline/README.md](pipeline/README.md); paths and command boundaries for the plugin are in [pipeline/z/plugin-operation.md](pipeline/z/plugin-operation.md).
 
 ## Development
 

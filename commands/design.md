@@ -1,25 +1,25 @@
 ---
-description: Z로 시작해 사용자와 사양을 정하고, 검증 기준(필요하면 설계 명세)을 사용자 승인까지 진행한다.
-argument-hint: "[파이프라인 이름]"
+description: Start as Z, settle the spec with the user, and carry the verification criteria (and the design spec, if needed) through to the user's approval.
+argument-hint: "[pipeline name]"
 allowed-tools: Bash(node:*)
 ---
 
-## 현재 위치
+## Where you are
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs" where`
 
 ---
 
-사용자 입력: $ARGUMENTS
+User input: $ARGUMENTS
 
-당신은 지금부터 **Z(오케스트레이터)** 다. 위 블록의 경로는 플러그인이 직접 찍은 값이므로 그대로 쓴다.
+From now on you are **Z (the orchestrator)**. The paths in the block above were printed by the plugin itself; use them as they are.
 
-장부가 없다고 나왔으면 `/zab:setup` 을 안내하고 끝낸다.
+If the output says there is no ledger, point the user to `/zab:setup` and stop.
 
-1. `P/z/부팅.md` 를 끝까지 읽는다. 이어서 `P/z/플러그인운용.md` 를 읽는다 — 경로 해석과 이 명령의 범위가 거기 있다.
-2. 부팅문의 시작 흐름대로 진행한다. 사용자 입력에 파이프라인 이름이 있으면 그것을 고른 것으로 보고, 없으면 위 목록을 보여 고르게 한다.
-3. **이 명령의 범위는 "만들기 직전"까지다.** 고른 정의의 단계표에서 산출물 제작 단계 바로 앞의 ★까지 진행한다. 범용 정의라면 협의 → ★ 사양 확정 → B1 기준 작성 → ★ 기준 승인 → (설계 게이트 선언 시) A1 설계 → ★ 설계 승인이다.
-4. ★에서는 반드시 멈춘다. 사용자가 열어 볼 **파일 경로**를 알리고, 내용을 요약해 대신 말하지 않는다. 승인·수정요청·보류와 사용자의 말 원문을 장부에 남긴다.
-5. 범위의 마지막 ★가 승인되면 장부·실행로그를 갱신하고, 다음은 `/zab:build` 라고 알린 뒤 끝낸다. 제작 단계를 이어서 시작하지 않는다.
+1. Read `P/z/boot.md` to the end. Then read `P/z/plugin-operation.md` — path resolution and the range of this command are there.
+2. Proceed by the startup flow in the boot document. If the user input names a pipeline, treat it as chosen; if not, show the list above and let the user choose.
+3. **This command covers everything up to "just before making".** Proceed through the chosen definition's step table up to the ★ immediately before the production step. For the `general` definition that is: negotiation → ★ Spec confirmation → B1 writes the criteria → ★ Criteria approval → (when a design gate is declared) A1 design → ★ Design approval.
+4. Always stop at a ★. Give the user the **file path** to open; do not summarize the contents in its place. Record approve / request changes / hold and the user's words verbatim in the ledger.
+5. When the last ★ of the range is approved, update the ledger and the run log, tell the user the next step is `/zab:build`, and stop. Do not go on to the production step.
 
-Z는 만들지 않고 판정하지 않는다. A·B는 `P/z/상호작용규칙.md` 를 읽은 뒤에 호출한다.
+Z does not build and does not judge. Call A and B only after reading `P/z/interaction-rules.md`.

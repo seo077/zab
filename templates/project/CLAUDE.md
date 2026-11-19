@@ -1,73 +1,73 @@
-# <프로젝트명>
+# <project>
 
-이 폴더는 **zab 프로젝트**다 — 사람이 결정하고, Z가 배치·중계·기록하고, A가 만들고, B가 판정한다.
-역할 문서·규칙·작업 설계도는 zab 플러그인 안에 한 벌만 있다. **이 프로젝트 폴더에는 복사해두지 않는다.**
+This folder is a **zab project** — a person decides, Z assigns · relays · records, A builds, and B judges.
+The role documents · rules · work blueprints exist as one set only, inside the zab plugin. **They are not copied into this project folder.**
 
-## 시작
+## Start
 
-| 명령 | 하는 일 |
+| Command | What it does |
 |---|---|
-| `/zab:design` | Z가 작업 목록을 보여주고, 사용자와 사양을 정하고, 검증 기준(·설계)을 승인까지 진행한다 |
-| `/zab:build` | A가 만들고, 새 세션의 B가 판정하고, 사용자가 최종 수락한다 |
+| `/zab:design` | Z shows the task list, settles the spec with the user, and carries the verification criteria (· design) through to approval |
+| `/zab:build` | A builds, a B in a fresh session judges, and the user gives final acceptance |
 
-명령 없이 Task를 만들지 않는다. 일반 질문은 그대로 답한다.
+Do not create a Task without a command. Answer ordinary questions as they are.
 
-**Z의 A·B 호출문이 있으면 지정 역할·절대경로·허용 자료로 바로 진입한다.** 전체 프로젝트 브리핑으로 돌아가지 않는다. B에게 이 문서 전체나 다른 Task를 추가로 읽히지 않는다. 필요한 고유 지침은 Z가 해당 단계에 허용한 원문 경로로 배정한다.
+**If there is a Z call message for A·B, enter directly with the specified role · absolute paths · permitted materials.** Do not go back to a whole-project briefing. Do not have B additionally read this whole document or other Tasks. Any project-specific guidance needed is assigned by Z as the original-text path permitted for that step.
 
-| 역할 | 하는 일 | 세션 여는 법 |
+| Role | What it does | How the session is opened |
 |---|---|---|
-| **Z** | 배치·중계·기록 | 사용자가 `/zab:design` · `/zab:build` 입력 |
-| **A** | 설계·산출물 제작 | Z 호출문으로 새 세션. 모드2(기본)는 Z가 호출, 모드1은 사람이 같은 전문을 새 창에 붙여넣기 |
-| **B** | 검증·판정 | Z 호출문과 허용 자료로 A·Z 대화와 분리된 새 세션 |
+| **Z** | Assign · relay · record | The user enters `/zab:design` · `/zab:build` |
+| **A** | Design · produce deliverables | A fresh session from Z's call message. In mode 2 (default) Z calls; in mode 1 a person pastes the same full text into a new window |
+| **B** | Verify · judge | A fresh session, separated from the A·Z conversation, from Z's call message and the permitted materials |
 
-작업·범위는 사용자가 정한다. A·B는 Z가 배치하며 ★(사람 확인 자리)에서 호출을 끝낸다. 자동 도구 승인과 ★ 업무 승인은 별개다.
+The user decides the work and the scope. A·B are assigned by Z and end their call at a ★ (human checkpoint). Automatic tool approval and ★ work approval are separate things.
 
-## 작업 단위 — Task
+## Unit of work — Task
 
-**파이프라인 한 판 = Task 하나 (`T1`·`T2`·…).** 작업을 시작할 때마다 Z가 Task 번호를 주고 `log/T{N}_<작업명>/` 방을 연다.
-Task끼리는 **병렬로** 돌 수 있다 (파일 소유와 내용 의존이 깨끗이 갈라질 때만). 진행 중 같은 단계의 재작업은 **Task 내부 반복 `R{M}`** 이다 (예: `T1 / 3단계 R2`).
+**One run of the pipeline = one Task (`T1` · `T2` · …).** Each time work starts, Z gives a Task number and opens the room `log/T{N}_<job>/`.
+Tasks can run **in parallel** with each other (only when file ownership and content dependencies split cleanly). Rework of the same step while in progress is **a repeat within the Task, `R{M}`** (e.g. `T1 / step 3 R2`).
 
-완료 뒤 변경은 완료 판·사양·판정·수락 기록을 보존하고 새 Task의 변경 차이와 보존할 바탕으로 범위를 정한다. 바탕 Task·완료 판·경로/지문·변경 영향과 확인 범위를 연결한다. 큰 설계 재작성을 일괄 강제하지 않으며 설계 게이트는 새 사양에서 정한다. 외부 장애의 진행 단계 재개와 구분한다. 보관/이관은 번호·최소 이력·최종 목적지·복구 사본을 보존하고 공용 `z/부팅.md` §Task의 절차를 따른다.
+A change after completion preserves the completed version · spec · verdict · acceptance records, and its scope is set by the new Task's change difference and the baseline to preserve. Link the baseline Task · completed version · path/fingerprint · change impact and the confirmation scope. A large design rewrite is not forced across the board, and the design gate is set in the new spec. This is distinguished from resuming an in-progress step after an external failure. Archive/transfer preserves the number · minimal history · final destination · recovery copy and follows the procedure of the shared `z/boot.md` §Task.
 
-## 폴더
+## Folders
 
-| 폴더·파일 | 무엇 | 누가 쓰나 |
+| Folder · file | What | Who writes |
 |---|---|---|
-| `프로젝트지도.md` | 프로젝트 전체 지도 — 목적·배경 / Task 목록·관계도 / 산출물 지도 / 외부 의존 경로. Task 생성·마감 때마다 갱신 (사용자 승인 대상) | Z |
-| `input/` | 받은 원자료는 보존. Z가 공통 추출본·원본 지문·읽기 관찰을 입력 준비 구획에 연결(공용 z/부팅.md 「입력·호스트 준비」). 해석·요약·산출물 제작 제외 | 사람: 원자료 / Z: 입력 준비 |
-| `output/` | 결과 — 이 작업이 만들어낸 것 | A |
-| `pipeline/` | 이 프로젝트에서 만든 파이프라인 정의·갈래·개선이력. 플러그인 것과 같은 모양(`z/pipelines/` · `a/갈래별/` · `b/갈래별/` · `개선이력/`). 처음엔 비어 있다 | 파이프라인신설 때의 Z·A·B |
-| `log/` | 진행 기록 — 아래 참조 | 역할별로 나뉨 |
+| `project-map.md` | Map of the whole project — purpose · background / Task list · relationship diagram / deliverable map / external dependency paths. Updated every time a Task is created or closed (subject to user approval) | Z |
+| `input/` | Source material received is preserved. Z links the common extract · original fingerprint · read observation to the input preparation section (shared z/boot.md "Input and host preparation"). Interpretation · summarizing · producing deliverables are excluded | A person: source material / Z: input preparation |
+| `output/` | Results — what this work produced | A |
+| `pipeline/` | The pipeline definitions · tracks · improvement history made in this project. The same shape as the plugin's (`z/pipelines/` · `a/tracks/` · `b/tracks/` · `improvements/`). Empty at first | Z·A·B at the time of `new-pipeline` |
+| `log/` | Progress records — see below | Divided by role |
 
-### log/ 안
+### Inside log/
 
-| 무엇 | 어디 | 쓰는 사람 |
+| What | Where | Who writes |
 |---|---|---|
-| Task 장부 — Task 목록·상태·의존 관계 (유일한 공동 장부) | `manifest.json` | **Z만** |
-| 단계별 진행 자취 (전 Task 공용) | `실행로그.md` | Z |
-| 회차별 결정·합의 (전 Task 공용) | `AI 논의사항.md` | Z |
-| Task 방 — Task 하나의 기록 전부 | `T{N}_<작업명>/` (예: `T1_예시작업/`) | 방 안에서 파일별로 나뉨 ↓ |
+| Task ledger — Task list · status · dependencies (the only shared ledger) | `manifest.json` | **Z only** |
+| Step-by-step trail of progress (shared by all Tasks) | `run-log.md` | Z |
+| Decisions · agreements per round (shared by all Tasks) | `decisions.md` | Z |
+| Task room — all the records of one Task | `T{N}_<job>/` (e.g. `T1_example/`) | Divided by file inside the room ↓ |
 
-### Task 방 안 (`log/T{N}_<작업명>/`)
+### Inside a Task room (`log/T{N}_<job>/`)
 
-| 파일 | 무엇 | 쓰는 사람 |
+| File | What | Who writes |
 |---|---|---|
-| `검증기준.md` | 이 Task에 적용할 검증 기준 합본 — 파이프라인 기준(공통·갈래별) 참조 + 프로젝트 고유 추가분 (사람 승인 대상) | **B** |
-| `설계명세.md` | 이 Task의 설계 결정·구조 — 파이프라인이 설계 게이트(설계 단계 + ★설계 승인)를 선언한 때만 존재 | A |
-| `구현요약/` | `A<N>_<단계명>_R<M>.md` — 설계·구현 각 단계와 회차의 요약 (예: A1_설계_R1.md) | A |
-| `검증요약/` | `B1_*.md` — 검증 결과 | B |
-| `관찰/<역할>_<단계명>_R<M>/제출본/` | 설계·기준/산출물의 고정 제출 사본. 실제 경로는 사양·호출에서 지정 | 해당 파일 소유 A/B |
-| `관찰/<역할>_<단계명>_R<M>/` | 제출 판·문서 리비전·bytes·SHA256·시각·바탕 판·복원/열람 관찰 | 해당 역할 |
-| `배정/` | 실제 회차별 읽기/쓰기·제외 범위·적용 시점의 중립 권한 원문과 승인/조건부 진행 연결 기록 | Z |
-| `호출/<역할>_<단계명>_R<M>.md` | 실제 호출 전문, 중립 권한의 동일 구획·경로/지문과 연결 | Z |
+| `criteria.md` | The merged verification criteria applied to this Task — references to the pipeline criteria (common · per-track) + project-specific additions (subject to human approval) | **B** |
+| `design-spec.md` | This Task's design decisions · structure — exists only when the pipeline has declared a design gate (design step + ★ Design approval) | A |
+| `build-summary/` | `A<N>_<step>_R<M>.md` — summary of each design · build step and round (e.g. A1_design_R1.md) | A |
+| `verification-summary/` | `B1_*.md` — verification results | B |
+| `observations/<role>_<step>_R<M>/submitted/` | Fixed submitted copies of the design · criteria/deliverables. The actual path is specified in the spec · call | The A/B that owns the file |
+| `observations/<role>_<step>_R<M>/` | Submitted version · document revision · bytes · SHA256 · time · baseline version · restore/open observation | The role concerned |
+| `assignments/` | The neutral permission record of the actual per-round read/write · excluded scope · time of application, and the record linking approval/conditional proceed | Z |
+| `calls/<role>_<step>_R<M>.md` | The full text of the actual call, linked with the same section · path/fingerprint of the neutral permission record | Z |
 
-**한 파일에는 주인이 하나다.** 여럿이 동시에 일할 때도 — Task가 여럿 병렬이어도 — 각자 자기 파일에만 쓴다.
+**One file has one owner.** Even when several work at the same time — even when several Tasks run in parallel — each writes only to its own files.
 
-설계·기준의 매 제출/승인 판 원문은 복구 가능한 사본이 기본이다. 사양에서 Git/버전 저장을 선택했다면 파일·판·복원 위치·실제 복원 결과를 남긴다. 지문만으로 원문 보존을 대신하지 않는다. 기준 r과 호출 R을 구별하고 Z가 사용자 원문·출처·날짜·범위를 고정 사본에 별도로 연결한다(공용 `z/상호작용규칙.md` §6.1).
+For the original text of every submitted/approved version of the design · criteria, a recoverable copy is the default. If Git/version storage was chosen in the spec, leave the file · version · restore location · actual restore result. A fingerprint alone does not stand in for preserving the original text. Distinguish the criteria r from the call R, and Z links the user's original words · source · date · scope to the fixed copy separately (shared `z/interaction-rules.md` §6.1).
 
-B에게는 회차별 중립 권한·전후 비교·기준 B가 정한 판독/대체 출처를 실제 경로로 배정한다. 현재 장부나 A 목록은 당시 권한 원문을 대신하지 않는다(같은 규칙 §6.2). 이 표의 예시 경로가 읽기/쓰기 권한을 자동 추가하지 않는다.
+To B, assign by actual path the per-round neutral permission record · the before/after comparison · the reading/substitute source set by the criteria-writing B. The current ledger or A's list does not stand in for the permission record of that time (§6.2 of the same rules). The example paths in this table do not automatically add read/write permission.
 
-## 이 프로젝트에만 해당하는 것
+## What applies only to this project
 
-> 프로젝트 고유의 사정(대상 자료, 지켜야 할 형식, 외부 경로 등)이 있으면 여기에 몇 줄로 적는다.
-> **일하는 방법**은 여기 적지 않는다 — 그건 파이프라인 저장소 몫이다.
+> If there are circumstances specific to the project (target materials, formats to keep, external paths, etc.), write them here in a few lines.
+> **How to work** is not written here — that is the pipeline repository's share.

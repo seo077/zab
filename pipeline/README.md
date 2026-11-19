@@ -1,133 +1,133 @@
-# 파이프라인 저장소
+# Pipeline repository
 
-Z·A·B 세 역할과, 그들을 조립하는 설계도를 **중앙에 한 벌만** 모아둔 곳.
-
----
-
-## 무엇이 달라졌나
-
-전에는 새 작업이 생기면 협업 템플릿 폴더를 **통째로 복사**했다. 그래서:
-
-- 사본이 프로젝트마다 흩어지고, 원본이 좋아져도 옛 사본은 낡은 채 남았다
-- 회차를 거치며 호출 문서가 무거워졌다
-- A·B가 각각 한 명이라는 전제로 짜여 있어, 여럿을 띄우면 공동 장부에서 부딪혔다
-
-이제는 **역할이 주인공**이고, 작업마다 "파이프라인 정의"라는 설계도대로 **조립해 쓴다.**
-복사하지 않는다. 프로젝트에는 재료·결과·진행 로그만 남는다.
+The place where the three roles Z·A·B, and the blueprints that assemble them, are kept **centrally, in one set only**.
 
 ---
 
-## 무엇을 어디에 두나 — 판단 3원칙
+## What changed
 
-| # | 원칙 |
+Before, when a new job came up, the collaboration template folder was **copied wholesale**. So:
+
+- Copies were scattered across projects, and even when the original improved, old copies stayed stale
+- The call documents grew heavy as rounds went by
+- It was built on the premise of one A and one B each, so launching several made them collide in the shared ledger
+
+Now **the roles are the main characters**, and for each job they are **assembled and used** according to a blueprint called a "pipeline definition".
+Nothing is copied. Only materials, results and the progress log remain in the project.
+
+---
+
+## What goes where — 3 principles for deciding
+
+| # | Principle |
 |---|---|
-| **1** | 한 번 쓰는 **사실**은 프로젝트에, 되풀이하는 **방법**은 파이프라인에 |
-| **2** | 작업 중에는 파이프라인이 **읽기 전용**이다. 개선은 별도 회차에서 |
-| **3** | 애매하면 일단 **프로젝트**에 둔다. 되풀이가 확인되면 파이프라인으로 올린다 — **한 방향으로만** |
+| **1** | **Facts** used once go in the project; **methods** that are repeated go in the pipeline |
+| **2** | During the work the pipeline is **read-only**. Improvement happens in a separate round |
+| **3** | When unsure, put it in the **project** for now. When repetition is confirmed, promote it to the pipeline — **in one direction only** |
 
 ---
 
-## 폴더 지도
+## Folder map
 
 ```
 pipeline/
-├── README.md              ← 지금 이 문서
-├── z/                     오케스트레이터
-│   ├── 부팅.md            Z가 켜질 때 읽는 얇은 문서
-│   ├── 상호작용규칙.md    A·B에게 지시하고 결과를 받는 법 (두 실행 모드 포함)
+├── README.md              ← this document
+├── z/                     orchestrator
+│   ├── boot.md            the thin document Z reads when it starts
+│   ├── interaction-rules.md    how to instruct A·B and receive results (including the two execution modes)
 │   └── pipelines/
-│       ├── _양식.md       파이프라인 정의 양식
-│       └── <작업명>.md    작업 하나 = 파일 하나
-├── a/                     설계·구현
-│   ├── 부팅.md
-│   ├── 공통규칙.md        갈래와 무관하게 늘 적용
-│   └── 갈래별/<작업명>/   규칙.md · 참고자료/ · skills/
-├── b/                     검증·판정
-│   ├── 부팅.md
-│   ├── 공통규칙.md        ★ 독립성 원칙 — 가볍게 만들지 않는다
-│   ├── 검증기준_공통.md
-│   └── 갈래별/<작업명>/   검증기준.md · 참고자료/ · skills/
-└── 개선이력/              왜·어떻게 고쳤나 (되풀이가 확인된 교훈만)
+│       ├── _template.md   pipeline definition template
+│       └── <job>.md       one job = one file
+├── a/                     design · build
+│   ├── boot.md
+│   ├── common-rules.md    always applied, regardless of track
+│   └── tracks/<job>/      rules.md · references/ · skills/
+├── b/                     verify · judge
+│   ├── boot.md
+│   ├── common-rules.md    ★ the independence principle — do not make it lighter
+│   ├── common-criteria.md
+│   └── tracks/<job>/      criteria.md · references/ · skills/
+└── improvements/          why · how it was fixed (only lessons confirmed by repetition)
 ```
 
-> `b/` 아래 문서의 **본문은 검증자만 쓴다.** 다른 역할은 폴더와 빈 파일까지만 만들 수 있다.
-> 여기가 가벼워지면 검증이 무너지므로, 다른 문서를 얇게 만들 때도 이곳만은 덜어내지 않는다.
+> The **body text** of the documents under `b/` **is written only by the verifier.** Other roles may create only the folders and empty files.
+> If this place gets lighter, verification collapses, so even when other documents are made thinner, nothing is taken away from here.
 
 ---
 
-## 플러그인으로 쓸 때
+## When used as a plugin
 
-이 저장소는 zab 플러그인의 `pipeline/` 폴더로 배포된다. 프로젝트에 복사하지 않으며, 프로젝트는 경로를 적어 둘 필요도 없다 — 명령과 세션 배너가 절대경로를 알려 준다. 경로 해석 · 프로젝트 층(`<프로젝트>/pipeline/`) · 명령이 맡는 구간은 [z/플러그인운용.md](z/플러그인운용.md)에 있다.
+This repository is distributed as the `pipeline/` folder of the zab plugin. This copy is never written to. What the work produces — new definitions, tracks, improvement history, accumulated references — is written to the user layer, a folder of the user's own that every project of theirs reads; the project's own `pipeline/` (the project layer) holds only what should apply to that project alone. Both are read before this copy. It is not copied into the project, and the project does not need to write the path down either — the commands and the session banner tell you the absolute paths. Path resolution · the project layer (`<project>/pipeline/`) · the stretch each command covers are in [z/plugin-operation.md](z/plugin-operation.md).
 
-## 시작하는 법
+## How to start
 
-1. 프로젝트 폴더에서 세션을 열고 `/zab:setup` — 폴더와 빈 장부가 생긴다.
-2. 재료를 `input/` 에 넣고 `/zab:design` — Z가 `z/pipelines/` 의 목록을 보여준다 → 작업을 고르고, 사양·검증 기준(·설계)을 ★ 승인까지 진행한다.
-3. `/zab:build` — A가 만들고, 새 세션의 B가 판정하고, 사용자가 최종 수락한다.
+1. Open a session in the project folder and run `/zab:setup` — the folders and an empty ledger are created.
+2. Put the materials in `input/` and run `/zab:design` — Z shows the list in `z/pipelines/` → choose the job, and proceed with the spec and the verification criteria (and the design) up to ★ approval.
+3. `/zab:build` — A builds, a B in a fresh session judges, and the user gives final acceptance.
 
-**★에서 역할 호출을 끝내고 사용자 권한을 확인한다.** 직접 확인 승인과 구체 수정 회차의 조건부 진행 권한은 `z/상호작용규칙.md` §1.1·§6.4를 따른다. 다음 단계는 새 세션이다.
+**At a ★, end the role call and confirm the user's permission.** Approval by direct inspection and the conditional proceed permission of a specific revision round follow `z/interaction-rules.md` §1.1·§6.4. The next step is a fresh session.
 
-실행 모드는 둘이다 — 사람이 창을 여러 개 여는 **모드1**, Z가 서브에이전트를 돌리는 **모드2**(기본). 두 모드는 **같은 파이프라인 정의를 쓰고, 같은 자리에서 멈춘다.** 자세한 것은 `z/상호작용규칙.md`.
+There are two execution modes — **mode 1**, where a person opens several windows, and **mode 2** (the default), where Z runs subagents. The two modes **use the same pipeline definition and stop at the same places.** For details, see `z/interaction-rules.md`.
 
 ---
 
-## 새 작업을 추가하는 법
+## How to add a new job
 
-| 무엇이 필요한가 | 무엇을 하나 |
+| What is needed | What to do |
 |---|---|
-| 새 종류의 작업 | `z/pipelines/_양식.md` 를 복사해 `<작업명>.md` 로 채운다 |
-| 그 작업에만 필요한 A 지식 | `a/갈래별/<작업명>/` 폴더를 만든다 |
-| 그 작업에만 필요한 검증 관점 | `b/갈래별/<작업명>/` — **검증자가 채운다** |
+| A new kind of job | Copy `z/pipelines/_template.md` and fill it in as `<job>.md` |
+| Knowledge for A needed only for that job | Create the folder `a/tracks/<job>/` |
+| A verification viewpoint needed only for that job | `b/tracks/<job>/` — **the verifier fills it in** |
 
-폴더 하나, 파일 하나를 더하는 것이 전부다. 기존 것은 손대지 않는다.
-
----
-
-## 프로젝트 쪽은 어떻게 생겼나
-
-```
-<프로젝트>/
-├── CLAUDE.md           프로젝트 목적·고유 지침
-├── 프로젝트지도.md     프로젝트 전체 지도 — 목적 · Task 목록·관계도 · 산출물 지도 · 외부 의존 (Z 기록, 상시)
-├── input/              재료
-├── output/             결과
-├── pipeline/           이 프로젝트에서 만든 정의·갈래·개선이력 (프로젝트 층)
-└── log/                진행 기록
-    ├── manifest.json   Task 장부 — Task 목록·상태·의존 (Z만)
-    ├── 실행로그.md · AI 논의사항.md    전 Task 공용 (Z)
-    └── T{N}_<작업명>/  Task 방 — 파이프라인 한 판의 기록: 검증기준 · (설계명세) · 구현요약/ · 검증요약/
-```
-
-파이프라인 한 판을 돌리는 것 = **Task 하나(`T1`·`T2`·…)** 다. 한 프로젝트 안에서 여러 Task를 병렬로 돌릴 수 있다.
-양식은 플러그인의 `templates/project/` 에 있다.
-
-### 제출 판·배정·호출의 연결
-
-Task 방에는 단계·회차 요약 `구현요약/A<N>_<단계명>_R<M>.md`, 소유 역할별 `관찰/<역할>_<단계명>_R<M>/제출본/`의 고정 사본과 지문, Z의 `배정/` 중립 권한·승인 연결 및 `호출/` 실제 전문을 둔다. 실제 파일 경로·읽기/쓰기는 호출에서 정한다.
-
-설계·기준의 매 제출/승인 원문은 소유 역할이 복구 가능한 사본으로 보존하며, 기준 r과 호출 R은 구별한다. 사양이 선택한 Git/버전 저장은 실제 원문 복원을 확인한다. Z는 사용자 원문·출처·날짜·승인 범위를 해당 사본/판/지문에 별도 연결한다. 상세는 `z/상호작용규칙.md` §6.1, A 제출은 `a/공통규칙.md` §4.2·§5다.
-
-B에게는 실제 회차별 중립 권한 원문과 전후 비교·판독/대체 출처 경로를 배정한다. 호출 경로/지문·동일 권한 구획을 보존하고 현재 장부나 A 자체 변경목록으로 대신하지 않는다(`z/상호작용규칙.md` §6.2). 안내 경로는 다른 역할 본문을 읽을 권한이 아니다.
+Adding one folder and one file is all there is. Existing things are not touched.
 
 ---
 
-## 출처 표기에 대하여
+## What the project side looks like
 
-이 저장소의 문서는 다른 작업 공간에서 여러 회차에 걸쳐 만들어져 옮겨 온 것이다. 그래서 본문 곳곳에 그곳의 기록을 가리키는 표기가 남아 있다.
+```
+<project>/
+├── CLAUDE.md           project purpose · project-specific instructions
+├── project-map.md      map of the whole project — purpose · Task list and relationship diagram · map of deliverables · external dependencies (recorded by Z, always present)
+├── input/              materials
+├── output/             results
+├── pipeline/           definitions · tracks · improvement history made in this project (project layer)
+└── log/                progress records
+    ├── manifest.json   Task ledger — Task list · statuses · dependencies (Z only)
+    ├── run-log.md · decisions.md    shared by all Tasks (Z)
+    └── T{N}_<job>/     Task room — the record of one run of the pipeline: criteria · (design spec) · build-summary/ · verification-summary/
+```
 
-| 표기 | 뜻 |
+Running one run of the pipeline = **one Task (`T1`·`T2`·…)**. Several Tasks can be run in parallel within one project.
+The template is in the plugin's `templates/project/`.
+
+### Linking submitted versions, assignments and calls
+
+The Task room holds the step/round summaries `build-summary/A<N>_<step>_R<M>.md`, the fixed copies and fingerprints in each owning role's `observations/<role>_<step>_R<M>/submitted/`, Z's neutral permission and approval links in `assignments/`, and the actual full text in `calls/`. The actual file paths and reads/writes are fixed in the call.
+
+Every submitted/approved original text of the design and the criteria is preserved by the owning role as a recoverable copy, and the criteria r and the call R are distinguished. For Git/version storage chosen by the spec, confirm an actual restoration of the original text. Z separately links the user's original words, source, date and scope of approval to the relevant copy/version/fingerprint. Details are in `z/interaction-rules.md` §6.1; A's submission is in `a/common-rules.md` §4.2·§5.
+
+To B, assign the actual per-round neutral permission record and the paths of the before/after comparison and the reading / substitute sources. Preserve the call path/fingerprint and the identical permission section, and do not substitute the current ledger or A's own change list (`z/interaction-rules.md` §6.2). A path given for guidance is not permission to read another role's body text.
+
+---
+
+## About the source citations
+
+The documents of this repository were made over several rounds in another workspace and brought over. That is why notations pointing to the records of that place remain throughout the text.
+
+| Notation | Meaning |
 |---|---|
-| `D-58` · `D-62` … | 원 작업 공간에서 사용자가 내린 결정의 번호. 그 규칙·항목이 **누구의 어떤 결정에서 나왔는지**를 밝히는 출처다 |
-| `Round 7` · `Phase 4` | 그 결정이 내려진 논의 회차 |
-| "원 작업 공간" · "v0.7 개발 저장소" | 이 문서들이 만들어진 곳. 그 기록 원문(`log/AI 논의사항.md` 등)은 **이 배포본에 들어 있지 않다** |
-| 날짜가 붙은 변경 이력 · 리비전 `r1`~`r9` | 그곳에서 기준이 개정된 자취 |
+| `D-58` · `D-62` … | The number of a decision the user made in the origin workspace. It is the source that states **whose decision, and which one,** that rule or item came from |
+| `Round 7` · `Phase 4` | The discussion round in which that decision was made |
+| "the origin workspace" · "the v0.7 development repository" | The place where these documents were made. The original text of those records (`log/AI 논의사항.md` and the like) is **not included in this distribution** |
+| Dated change history · revisions `r1`–`r9` | The traces of the criteria being revised there |
 
-규칙과 검증 항목은 본문에 적힌 문장만으로 완결된다. 출처 표기는 따라가 볼 수 없어도 읽고 쓰는 데 지장이 없으며, 지우지 않은 것은 항목마다 근거를 밝힌다는 이 저장소의 원칙 때문이다. **여러분의 프로젝트에서 새로 생기는 `D-N` 은 그 프로젝트 `log/AI 논의사항.md` 의 번호이고, 위 번호들과 무관하다.**
+The rules and verification items are complete with only the sentences written in the text. Even though the source citations cannot be followed, this does not hinder reading or writing; they were not erased because of this repository's principle that the basis is stated for every item. **A `D-N` newly arising in your project is a number in that project's `log/decisions.md` and is unrelated to the numbers above.**
 
 ---
 
-## 세 가지 선
+## The three lines
 
-1. **판정은 검증자만** — 오케스트레이터가 여러 검증 결과를 합치면 그 순간 오케스트레이터가 판정한 셈이 된다. 검증자가 여럿이면 **종합 검증자를 한 명 더** 둔다.
-2. **공동 장부는 오케스트레이터만** — `log/manifest.json` 은 Z 전용. 각자의 요약은 담당별 파일로 나눈다.
-3. **사람 확인 자리에서는 끊는다** — 서브에이전트는 작업 도중 사용자와 대화할 수 없다. 그래서 확인이 필요한 자리에서 호출을 둘로 쪼갠다.
+1. **Only the verifier judges** — if the orchestrator merges several verification results, at that moment the orchestrator has in effect judged. When there are several verifiers, add **one more, a synthesizing verifier**.
+2. **Only the orchestrator writes the shared ledger** — `log/manifest.json` is Z's alone. Each one's summary is split into per-assignee files.
+3. **Cut at the human checkpoint** — a subagent cannot talk with the user in the middle of the work. So at a place that needs a check, the call is split in two.

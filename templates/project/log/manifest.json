@@ -1,67 +1,67 @@
 {
   "_meta": {
-    "project": "<프로젝트명>",
+    "project": "<project>",
     "pipeline_repo": "plugin:zab",
     "updated_at": "<ISO8601>",
     "owner": "Z"
   },
 
-  "_주의": [
-    "본 장부는 Task 장부이자 유일한 공동 장부다 — Task 목록·상태·의존 관계를 담는다. 오케스트레이터(Z)만 쓴다. A·B는 읽기만 한다.",
-    "Task 하나 = 파이프라인 한 판. Task마다 log/T{N}_<작업명>/ 방이 하나 있고, 방 이름의 <작업명>은 tasks의 '이름'과 같게 둔다.",
-    "여럿이 동시에 일해도 — Task가 여럿 병렬이어도 — 이 파일에 쓰는 것은 Z 하나다. 그래서 충돌이 나지 않는다.",
-    "각 담당의 요약은 이 파일이 아니라 자기 Task 방 안 담당별 파일로 나뉜다: log/T{N}_<작업명>/구현요약/A<N>_*.md · log/T{N}_<작업명>/검증요약/B<N>_*.md",
-    "이 파일에는 '어디에 무엇이 있는지'만 적는다. 내용 자체는 각 산출물 파일에 있다.",
-    "_meta.pipeline_repo 의 값 plugin:zab 은 역할 문서·정의가 zab 플러그인 안에 있다는 표지다. 절대경로는 명령과 세션 배너가 알려 준다."
+  "_notes": [
+    "This ledger is the Task ledger and the only shared ledger — it holds the Task list, status and dependencies. Only the orchestrator (Z) writes it. A and B only read it.",
+    "One Task = one run of the pipeline. Each Task has one room log/T{N}_<job>/, and the <job> in the room name is kept the same as 'name' in tasks.",
+    "Even when several work at the same time — even when several Tasks run in parallel — only Z writes to this file. That is why there are no conflicts.",
+    "Each assignee's summary is not in this file but is split into per-assignee files inside its own Task room: log/T{N}_<job>/build-summary/A<N>_*.md · log/T{N}_<job>/verification-summary/B<N>_*.md",
+    "This file records only 'what is where'. The content itself is in each deliverable file.",
+    "The value plugin:zab of _meta.pipeline_repo is a marker that the role documents and definitions are inside the zab plugin. The absolute path is given by the commands and the session banner."
   ],
 
   "_schema": {
     "tasks": {
       "<T1 | T2 | …>": {
-        "이름": "<작업명 — 방 이름 T{N}_<작업명> 의 <작업명> 과 같게>",
-        "방": "<log/T{N}_<작업명>/>",
-        "파이프라인": "<z/pipelines/<작업명>.md — 일회성 작업이면 z/pipelines/범용.md>",
-        "모드": "<모드1 | 모드2>",
-        "상태": "<대기 | 진행중 | 사람확인대기 | 완료 | 중단>",
-        "의존": ["<먼저 끝나야 하는 Task ID — 없으면 빈 배열>"],
-        "현재_단계": "<단계 식별자 — 재작업이면 R{M}을 붙인다. 예: 3단계 R2>",
+        "name": "<job — the same as the <job> in the room name T{N}_<job>>",
+        "room": "<log/T{N}_<job>/>",
+        "pipeline": "<z/pipelines/<job>.md — for a one-off job, z/pipelines/general.md>",
+        "mode": "<mode1 | mode2>",
+        "status": "<pending | in_progress | awaiting_human | done | stopped>",
+        "depends_on": ["<ID of a Task that must finish first — empty array if none>"],
+        "current_step": "<step identifier — append R{M} for rework. e.g. step 3 R2>",
         "agents": [
           {
-            "id": "<A1 | A2 | B1 | B2 | B종합>",
+            "id": "<A1 | A2 | B1 | B2 | B-synth>",
             "role": "<A | B>",
-            "맡은_범위": "<이 담당이 맡은 몫 한 줄>",
-            "전용_파일": ["<이 담당만 쓰는 경로>"]
+            "scope": "<one line on the share this assignee took>",
+            "owned_files": ["<path only this assignee writes>"]
           }
         ],
-        "산출물": ["<상대경로>"],
-        "확인지점": [
+        "outputs": ["<relative path>"],
+        "checkpoints": [
           {
-            "단계": "<★ 가 붙은 단계 식별자>",
-            "확인_대상": ["<사람이 열어본 파일 경로>"],
-            "결과": "<승인 | 수정요청 | 보류>",
-            "일자": "<YYYY-MM-DD>",
-            "사용자_말": "<사용자가 실제로 한 말 그대로>"
+            "step": "<identifier of the step that carries a ★>",
+            "reviewed": ["<path of a file the person opened>"],
+            "result": "<approved | changes_requested | hold>",
+            "date": "<YYYY-MM-DD>",
+            "user_words": "<what the user actually said, verbatim>"
           }
         ],
-        "판정": {
-          "종합자": "<B<N> | 없음>",
-          "결과": "<종합 검증자가 낸 한 줄 그대로>",
-          "보고서": ["<경로>"],
-          "일자": "<YYYY-MM-DD>"
+        "verdict": {
+          "synthesizer": "<B<N> | none>",
+          "result": "<the one line the synthesizing verifier gave, verbatim>",
+          "reports": ["<path>"],
+          "date": "<YYYY-MM-DD>"
         },
-        "시작": "<ISO8601>",
-        "종료": "<ISO8601 — 진행 중이면 빈 값>"
+        "started": "<ISO8601>",
+        "ended": "<ISO8601 — empty while in progress>"
       }
     },
     "history": [
       {
-        "task": "<T{N} — 어느 Task의 일인지. Task 밖 프로젝트 일이면 빈 값>",
-        "단계": "<단계 식별자>",
-        "담당": "<Z | A<N> | B<N> | 사용자>",
-        "한_일": "<한 줄>",
-        "시각": "<ISO8601>",
-        "파일": ["<상대경로>"],
-        "메모": "<선택>"
+        "task": "<T{N} — which Task this belongs to. Empty for project work outside a Task>",
+        "step": "<step identifier>",
+        "actor": "<Z | A<N> | B<N> | user>",
+        "did": "<one line>",
+        "at": "<ISO8601>",
+        "files": ["<relative path>"],
+        "note": "<optional>"
       }
     ]
   },
