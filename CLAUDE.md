@@ -87,7 +87,7 @@ no `allowed-tools` makes a command do nothing at all, with no error.
 **Measure the platform, do not cite the docs.**
 
 Before pushing: `npm test && claude plugin validate .` — `--strict` currently fails on
-two known warnings: this file sitting at the plugin root, and no icon yet.
+one known warning: this file sitting at the plugin root.
 
 ## State
 
@@ -161,7 +161,8 @@ not be public; rename the GitHub repo to `zab` and make it public (the README
 install line already says `seo077/zab`); then submit at
 `claude.ai/directory/manage` → Submit new → Plugin bundle. The checklist was run
 on 2026-11-19 and nothing failed; the security scan and human review only run in
-the portal. No icon yet.
+the portal. The icon is `.claude-plugin/icon.png`; the portal reads it only on
+the first save or submission.
 
 Housekeeping: branch `ung` is identical to `main` and can be deleted.
 
