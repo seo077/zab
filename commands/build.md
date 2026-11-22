@@ -1,7 +1,7 @@
 ---
 description: 승인된 사양·기준으로 A가 만들고, 새 세션의 B가 판정하고, 사용자가 최종 수락할 때까지 진행한다.
 argument-hint: "[Task 번호]"
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs" where)
 ---
 
 ## 현재 위치

@@ -1,6 +1,6 @@
 ---
 description: 이 폴더를 zab 프로젝트로 준비한다 — input · output · log · pipeline 폴더와 빈 장부를 만든다. 이미 있는 파일은 건드리지 않는다.
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs" setup)
 ---
 
 ## 실행 결과

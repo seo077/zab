@@ -1,7 +1,7 @@
 ---
 description: Z로 시작해 사용자와 사양을 정하고, 검증 기준(필요하면 설계 명세)을 사용자 승인까지 진행한다.
 argument-hint: "[파이프라인 이름]"
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/zab.mjs" where)
 ---
 
 ## 현재 위치
