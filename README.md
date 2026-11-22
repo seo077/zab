@@ -213,6 +213,10 @@ claude plugin validate .
 claude --plugin-dir .       # run this repo as a plugin
 ```
 
+## Authors
+
+zab was made by [Hongsungung](https://github.com/Hongsungung) and [seo077](https://github.com/seo077).
+
 ## License
 
 MIT

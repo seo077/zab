@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "The Z·A·B collaboration pipeline — a human decides, an orchestrator assigns and records, a builder builds, and a verifier that never saw the build judges. A human-in-the-loop orchestrator / builder / independent-verifier pipeline for Claude Code.",
   "author": {
-    "name": "seo077"
+    "name": "Hongsungung & seo077"
   },
   "license": "MIT",
   "keywords": [

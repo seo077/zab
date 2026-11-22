@@ -212,6 +212,10 @@ claude plugin validate .
 claude --plugin-dir .       # 이 저장소를 플러그인으로 얹어 실행
 ```
 
+## 만든 사람
+
+zab은 [Hongsungung](https://github.com/Hongsungung)과 [seo077](https://github.com/seo077)이 함께 만들었다.
+
 ## 라이선스
 
 MIT
