@@ -2,10 +2,14 @@
   "name": "zab",
   "displayName": "zab",
   "version": "0.1.0",
-  "description": "Z·A·B 협업 파이프라인 — 사람이 결정하고, 오케스트레이터가 배치·기록하고, 구현자가 만들고, 만든 과정을 보지 못한 검증자가 판정한다. A human-in-the-loop orchestrator / builder / independent-verifier pipeline for Claude Code.",
+  "description": "The Z·A·B collaboration pipeline — a human decides, an orchestrator assigns and records, a builder builds, and a verifier that never saw the build judges. A human-in-the-loop orchestrator / builder / independent-verifier pipeline for Claude Code. The method documents the agents read are written in Korean.",
   "author": {
     "name": "Hongsungung & seo077"
   },
+  "homepage": "https://github.com/seo077/zab#readme",
+  "repository": "https://github.com/seo077/zab",
+  "supportUrl": "https://github.com/seo077/zab/issues",
+  "privacyPolicyUrl": "https://github.com/seo077/zab/blob/main/PRIVACY.md",
   "license": "MIT",
   "keywords": [
     "pipeline",
@@ -13,5 +17,8 @@
     "verification",
     "human-in-the-loop",
     "subagents"
-  ]
+  ],
+  "network": {
+    "hosts": []
+  }
 }

@@ -8,7 +8,7 @@
     {
       "name": "zab",
       "source": "./",
-      "description": "Z·A·B 협업 파이프라인: /zab:setup → /zab:design → /zab:build. 기준을 먼저 쓰고, 사람이 승인하고, 만든 과정을 보지 못한 검증자가 판정한다.",
+      "description": "The Z·A·B collaboration pipeline: /zab:setup → /zab:design → /zab:build. Criteria are written first, a human approves them, and a verifier that never saw the build judges. The method documents are written in Korean.",
       "category": "workflow",
       "tags": ["pipeline", "orchestrator", "verification", "human-in-the-loop"]
     }

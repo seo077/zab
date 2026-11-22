@@ -86,8 +86,56 @@ no `allowed-tools` makes a command do nothing at all, with no error.
 
 **Measure the platform, do not cite the docs.**
 
-Before pushing: `npm test && claude plugin validate .` — `--strict` currently fails on
-one known warning: this file sitting at the plugin root.
+Before pushing: `npm test && claude plugin validate . --profile directory` —
+`--strict` currently fails on one known warning: this file sitting at the plugin
+root.
+
+**The directory's rules shape a few files here.** They come from the plugin
+pre-submission checklist and the Software Directory Policy (read on 2026-11-22);
+a later edit must not undo them.
+
+- `.gitattributes` stays `* text=auto eol=lf`. The checklist stops validation,
+  with an error that names no cause, for `export-ignore`, `export-subst`,
+  `filter` and other attributes that rewrite file contents. One submitter reports
+  being refused with `* text=auto` alone and passing once `eol=lf` was added —
+  the form already here. Measured on Windows with `core.autocrlf=true`: an
+  install from the marketplace keeps LF.
+- Each command's `allowed-tools` names its own `zab.mjs` call and nothing else
+  (`${CLAUDE_PLUGIN_ROOT}` is expanded in front matter — measured, 2.1.330). The
+  older `Bash(node:*)` pre-approved any Node command for the whole turn, and the
+  directory held versions for exactly that. A new `!` line needs its own exact
+  entry, or the command does nothing.
+- The README says everything the plugin runs, reads and writes, hook by hook.
+  The security scan looks for behaviour a plugin does not disclose, permission
+  changes included, so a new hook or a new write location goes into both READMEs
+  in the same commit.
+- `network.hosts` in `plugin.json` is declared empty because the script has no
+  network code. If that ever changes, the list changes with it.
+- A bundled image or font is never named by its path in backticks or a code
+  block, in any file. The checklist holds a version for that.
+- `PRIVACY.md` and `SECURITY.md` answer the policy's privacy-policy and
+  vulnerability-reporting clauses; `supportUrl` and `privacyPolicyUrl` in
+  `plugin.json` point at them.
+- The hooks run a Node file, which the directory's validator cannot follow, so
+  every version is held for a human reviewer. That is expected, not a defect.
+  The read hook answers `allow`, and submitters report a separate hold for any
+  hook that can approve a tool call.
+
+**The directory may refuse this plugin as it is** (read on 2026-11-22, not
+measured for zab). Since about 2026-11-05 submitters report, in issue 7024 of
+`anthropics/claude-plugins-official`, that the directory refuses command hooks,
+script files, inline `!` shell and `allowed-tools` beyond Read/Grep/Glob/LS from
+organizations that are not Verified. zab has all four, and they are how it
+works: without the read hook a subagent cannot open the role documents.
+Anthropic has not documented the rule or answered the issue, and
+`claude plugin validate --profile directory` does not show it. The portal's own
+Validate step is the measurement. Do not strip the hooks to get listed without
+the owners deciding that — it is a different product.
+
+**The own-marketplace install does not depend on any of that, and is measured**
+(2026-11-22, 2.1.330, Windows, an isolated config folder, the public repo):
+`claude plugin marketplace add seo077/zab`, then `claude plugin install zab@zab`.
+The README's one-line form with `--marketplace` works too.
 
 ## State
 
@@ -161,8 +209,9 @@ not be public; rename the GitHub repo to `zab` and make it public (the README
 install line already says `seo077/zab`); then submit at
 `claude.ai/directory/manage` → Submit new → Plugin bundle. The checklist was run
 on 2026-11-19 and nothing failed; the security scan and human review only run in
-the portal. The icon is `.claude-plugin/icon.png`; the portal reads it only on
-the first save or submission.
+the portal. The listing icon is the PNG in the manifest folder; the portal reads
+it only on the first save or submission. The repository went public on
+2026-11-22.
 
 Housekeeping: branch `ung` is identical to `main` and can be deleted.
 

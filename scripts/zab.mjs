@@ -5,9 +5,15 @@
 //   where    print the paths and state Z needs to boot
 //   banner   SessionStart hook: show the Task board, hand the model the paths
 //   allow-read  PreToolUse hook: let a session read the plugin's own documents
+//   own      PreToolUse hook: one owner per file — the only thing that refuses
 //
-// Nothing here blocks anything. The method lives in pipeline/ as documents;
-// this file only finds them and copies a template.
+// The method lives in pipeline/ as documents; this file finds them, copies a
+// template, and checks the one rule a machine can check — file ownership.
+//
+// What it touches: local files only, through node:fs. No network, no child
+// processes, no environment variables, no credentials. `setup` writes into the
+// current folder, `own` appends one log line inside a zab project, and the
+// rest only read.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -378,7 +384,7 @@ function main() {
     console.log(where(cwd));
     return;
   }
-  console.error('usage: zab.mjs setup | where | banner');
+  console.error('usage: zab.mjs setup | where | banner | allow-read | own');
   process.exitCode = 1;
 }
 
